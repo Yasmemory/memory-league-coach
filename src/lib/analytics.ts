@@ -5,6 +5,25 @@ export const percent = (value: number) => `${Math.round(value)}%`;
 
 export const record = (value: number) => (value > 0 ? value.toFixed(1) : "-");
 
+export type PracticeMenuItem = {
+  discipline: Discipline;
+  count: number;
+  reason: string;
+};
+
+export type WindowStats = {
+  discipline: Discipline;
+  size: number;
+  available: number;
+  isEnoughData: boolean;
+  averageScore: number;
+  averageTime: number;
+  successRate: number;
+  stability: number;
+  bestScore: number;
+  bestTime: number;
+};
+
 export function filterLogsByMode(logs: PracticeLog[], mode: LogMode | "all") {
   const normalized = logs.map(normalizeStoredLog);
   return mode === "all" ? normalized : normalized.filter((log) => log.mode === mode);
@@ -26,9 +45,9 @@ export function getDisciplineStats(logs: PracticeLog[], mode: LogMode | "all" = 
     const positiveTimes = items.map((log) => log.time ?? log.bestRecord).filter((time) => time > 0);
     const bestTime = positiveTimes.length > 0 ? Math.min(...positiveTimes) : 0;
     const successRate = attempts > 0 ? (successes / attempts) * 100 : 0;
-    const variance =
+    const averageDelta =
       items.length > 1 ? items.reduce((sum, log) => sum + Math.abs((log.time ?? 0) - averageTime), 0) / items.length : 0;
-    const stability = Math.max(0, 100 - variance * 2 - Math.max(0, 70 - successRate));
+    const stability = Math.max(0, 100 - averageDelta * 2 - Math.max(0, 70 - successRate));
     const weaknessScore = (100 - successRate) + averageTime / 3 + Math.max(0, 70 - stability) / 2 - averageScore / 10;
 
     return {
@@ -47,6 +66,45 @@ export function getDisciplineStats(logs: PracticeLog[], mode: LogMode | "all" = 
       weaknessScore,
     };
   });
+}
+
+export function calculateWindowStats(discipline: Discipline, logs: PracticeLog[], size: number, mode: LogMode | "all" = "all"): WindowStats {
+  const items = filterLogsByMode(logs, mode)
+    .filter((log) => log.discipline === discipline)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, size);
+  const available = items.length;
+  const attempts = items.reduce((sum, log) => sum + log.attempts, 0);
+  const successes = items.reduce((sum, log) => sum + log.successes, 0);
+  const averageScore = available > 0 ? items.reduce((sum, log) => sum + (log.score ?? 0), 0) / available : 0;
+  const averageTime = available > 0 ? items.reduce((sum, log) => sum + (log.time ?? log.averageRecord), 0) / available : 0;
+  const successRate = attempts > 0 ? (successes / attempts) * 100 : 0;
+  const positiveTimes = items.map((log) => log.time ?? log.bestRecord).filter((time) => time > 0);
+  const bestTime = positiveTimes.length > 0 ? Math.min(...positiveTimes) : 0;
+  const bestScore = available > 0 ? Math.max(...items.map((log) => log.score ?? 0)) : 0;
+  const averageDelta =
+    available > 1 ? items.reduce((sum, log) => sum + Math.abs((log.time ?? log.averageRecord) - averageTime), 0) / available : 0;
+  const stability = available > 1 ? Math.max(0, 100 - averageDelta * 3) : 0;
+
+  return {
+    discipline,
+    size,
+    available,
+    isEnoughData: available >= size,
+    averageScore,
+    averageTime,
+    successRate,
+    stability,
+    bestScore,
+    bestTime,
+  };
+}
+
+export function getDisciplineWindowStats(logs: PracticeLog[], mode: LogMode | "all" = "all", sizes = [5, 10, 20, 50]) {
+  return DISCIPLINES.map((discipline) => ({
+    discipline,
+    windows: sizes.map((size) => calculateWindowStats(discipline, logs, size, mode)),
+  }));
 }
 
 export function getRecentTrend(logs: PracticeLog[], days = 7, mode: LogMode | "all" = "all") {
@@ -73,6 +131,30 @@ export function getWeaknessRanking(logs: PracticeLog[], mode: LogMode | "all" = 
 export function getRecommendedDisciplines(logs: PracticeLog[]) {
   const weakness = getWeaknessRanking(logs);
   return weakness.length > 0 ? weakness.slice(0, 2).map((item) => item.discipline) : DISCIPLINES.slice(0, 2);
+}
+
+export function generatePracticeMenu(logs: PracticeLog[]): PracticeMenuItem[] {
+  const stats = getDisciplineStats(logs);
+  const recent = getRecentTrend(logs, 7).recent;
+  const maxRecentAttempts = Math.max(1, ...DISCIPLINES.map((discipline) => recent.filter((log) => log.discipline === discipline).length));
+
+  return stats
+    .map((stat) => {
+      const recentCount = recent.filter((log) => log.discipline === stat.discipline).length;
+      const lowSuccessBonus = Math.max(0, (75 - stat.successRate) / 12);
+      const weaknessBonus = Math.max(0, stat.weaknessScore / 35);
+      const lowRecentBonus = Math.max(0, maxRecentAttempts - recentCount) * 0.8;
+      const count = Math.max(3, Math.min(10, Math.round(3 + lowSuccessBonus + weaknessBonus + lowRecentBonus)));
+      const reason =
+        recentCount === 0
+          ? "直近の練習回数が少ない"
+          : stat.successRate < 70
+            ? "成功率を戻したい"
+            : "バランス維持";
+
+      return { discipline: stat.discipline, count, reason };
+    })
+    .sort((a, b) => DISCIPLINES.indexOf(a.discipline) - DISCIPLINES.indexOf(b.discipline));
 }
 
 export function compareWithOpponent(logs: PracticeLog[], opponent?: Opponent) {
@@ -109,8 +191,8 @@ export function buildMatchPlan(logs: PracticeLog[], opponent?: Opponent) {
     menu,
     winLine:
       targets.length > 0
-        ? `${targets.join(" / ")}を確実に取り、${warnings[0] ?? "相手の得意種目"}は成功率優先で崩れ待ち。`
-        : "ログを追加して、自分が確実に取れる種目を見つけましょう。",
+        ? `${targets.join(" / ")}を優先し、${warnings[0] ?? "相手の得意種目"}は成功率を崩さない練習方針にします。`
+        : "ログを追加して、自分が安定して取れる種目を見つけましょう。",
   };
 }
 
@@ -157,11 +239,11 @@ export function daysUntil(date: string) {
 export function getDisciplineTone(discipline: Discipline) {
   const tones: Record<Discipline, string> = {
     Cards: "bg-emerald-100 text-emerald-900 border-emerald-200",
-    Numbers: "bg-sky-100 text-sky-900 border-sky-200",
     Images: "bg-amber-100 text-amber-950 border-amber-200",
-    Words: "bg-rose-100 text-rose-900 border-rose-200",
-    Names: "bg-violet-100 text-violet-900 border-violet-200",
     "International Names": "bg-cyan-100 text-cyan-950 border-cyan-200",
+    Names: "bg-violet-100 text-violet-900 border-violet-200",
+    Numbers: "bg-sky-100 text-sky-900 border-sky-200",
+    Words: "bg-rose-100 text-rose-900 border-rose-200",
   };
   return tones[discipline];
 }

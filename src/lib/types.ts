@@ -55,6 +55,7 @@ export type Opponent = {
 };
 
 export type Settings = {
+  tournamentName?: string;
   tournamentDate: string;
   nextOpponentId: string;
   playerName: string;

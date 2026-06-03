@@ -17,7 +17,7 @@ export const sampleLogs: PracticeLog[] = [
   ["International Names", "official", 5, 5, 18, 88.7, "読み始めの速度が課題。"],
   ["Cards", "rated", 6, 10, 52, 26.9, "短期戦向けに好調。"],
   ["Numbers", "train", 7, 8, 46, 79.4, "落ち着くと正確。"],
-  ["Images", "rated", 8, 6, 61, 49.9, "2本目で集中が落ちた。"],
+  ["Images", "rated", 8, 6, 61, 49.9, "2回目で集中が落ちた。"],
   ["Words", "official", 9, 4, 38, 65.7, "復習量を増やす。"],
   ["Names", "train", 10, 5, 28, 69.8, "名前変換は改善傾向。"],
   ["International Names", "rated", 11, 4, 0, 94.3, "試合前は短く反復。"],
@@ -74,6 +74,7 @@ export const sampleData: CoachData = {
   logs: sampleLogs,
   opponents: sampleOpponents,
   settings: {
+    tournamentName: "日本大会",
     tournamentDate: isoDaysAgo(-21),
     nextOpponentId: "opponent-aoi",
     playerName: "You",

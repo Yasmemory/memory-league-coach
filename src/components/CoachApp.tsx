@@ -6,10 +6,11 @@ import {
   buildMatchPlan,
   daysUntil,
   filterLogsByMode,
+  generatePracticeMenu,
   getDisciplineStats,
   getDisciplineTone,
+  getDisciplineWindowStats,
   getRecentTrend,
-  getRecommendedDisciplines,
   getWeeklyReview,
   getWeaknessRanking,
   percent,
@@ -27,6 +28,7 @@ import {
 } from "@/app/shared";
 
 type View = "dashboard" | "practice" | "analytics" | "opponents" | "match-plan" | "weekly-review" | "settings" | "import";
+type NumberInputValue = number | "";
 
 const storageKey = "memory-league-coach:data:v1";
 
@@ -46,8 +48,8 @@ const emptyLog = () => ({
   date: todayIso(),
   discipline: "Cards" as Discipline,
   mode: "train" as LogMode,
-  score: "" as number | "",
-  time: "" as number | "",
+  score: "" as NumberInputValue,
+  time: "" as NumberInputValue,
   memo: "",
 });
 
@@ -55,19 +57,19 @@ const emptyOpponent = (): Omit<Opponent, "id"> => ({
   name: "",
   averages: {
     Cards: 30,
-    Numbers: 80,
     Images: 50,
-    Words: 65,
-    Names: 75,
     "International Names": 90,
+    Names: 75,
+    Numbers: 80,
+    Words: 65,
   },
   successRates: {
     Cards: 75,
-    Numbers: 75,
     Images: 75,
-    Words: 75,
-    Names: 75,
     "International Names": 75,
+    Names: 75,
+    Numbers: 75,
+    Words: 75,
   },
   memo: "",
 });
@@ -80,7 +82,11 @@ function useCoachData() {
 
     try {
       const parsed = JSON.parse(saved) as CoachData;
-      return { ...parsed, logs: parsed.logs.map(normalizeStoredLog) };
+      return {
+        ...parsed,
+        logs: parsed.logs.map(normalizeStoredLog),
+        settings: { ...sampleData.settings, ...parsed.settings },
+      };
     } catch {
       return sampleData;
     }
@@ -138,7 +144,7 @@ export function CoachApp({ view }: { view: View }) {
               </span>
             </Link>
             <div className="hidden rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-right text-xs text-zinc-600 sm:block">
-              直近7日 <span className="font-semibold text-zinc-950">{percent(trend.successRate)}</span>
+              直近7日 <span className="font-semibold text-zinc-950">{trend.attempts}回</span>
             </div>
           </div>
           <nav className="flex gap-2 overflow-x-auto pb-1">
@@ -174,25 +180,26 @@ function Dashboard({
   opponent?: Opponent;
   onAdd: (log: Omit<PracticeLog, "id">) => void;
 }) {
-  const focus = getRecommendedDisciplines(data.logs);
   const until = daysUntil(data.settings.tournamentDate);
-  const plan = buildMatchPlan(data.logs, opponent);
+  const practiceMenu = generatePracticeMenu(data.logs);
   const latest = data.logs.slice(0, 5);
+  const tournamentLabel = data.settings.tournamentName ? `${data.settings.tournamentName}まで` : "大会まで";
 
   return (
-    <Page title="ダッシュボード" subtitle="毎日の入力と、今日勝つための判断をここに集約します。">
+    <Page title="ダッシュボード" subtitle="毎日の入力と、今日やる練習メニューをここに集約します。">
       <Panel title="今日の練習メニュー">
-        <div className="grid gap-4 lg:grid-cols-[1.4fr_1fr]">
-          <div>
-            <p className="text-xl font-black">{plan.winLine}</p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-3">
-              <MiniMetric label="取りに行く種目" value={plan.targets.join(" / ") || "-"} />
-              <MiniMetric label="警戒する種目" value={plan.warnings.join(" / ") || "-"} />
-              <MiniMetric label="重点種目" value={focus.join(" / ")} />
-            </div>
+        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+          <div className="grid gap-3 sm:grid-cols-2">
+            {practiceMenu.map((item) => (
+              <div key={item.discipline} className={`rounded-lg border p-4 ${getDisciplineTone(item.discipline)}`}>
+                <div className="text-lg font-black">{item.discipline}</div>
+                <div className="mt-2 text-3xl font-black">{item.count}回</div>
+                <p className="mt-2 text-sm">{item.reason}</p>
+              </div>
+            ))}
           </div>
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-            <div className="text-xs font-semibold text-zinc-500">大会まで</div>
+            <div className="text-xs font-semibold text-zinc-500">{tournamentLabel}</div>
             <div className="mt-2 text-5xl font-black">{until === null ? "-" : Math.max(0, until)}</div>
             <p className="mt-2 text-sm text-zinc-600">{data.settings.tournamentDate || "設定で大会日を入力してください。"}</p>
           </div>
@@ -202,9 +209,9 @@ function Dashboard({
         <DailyLogForm onAdd={onAdd} />
       </Panel>
       <div className="grid gap-4 lg:grid-cols-3">
-        <Metric label="直近の調子" value={percent(trend.successRate)} detail={`${trend.attempts}本 / ${trend.successes}成功`} />
+        <Metric label="直近の調子" value={`${trend.attempts}回`} detail={`${trend.successes}成功 / 直近7日`} />
         <Metric label="次の対戦相手" value={opponent?.name ?? "未設定"} detail="対戦プランで相手別の練習方針を確認" />
-        <Metric label="今日の練習メニュー" value={plan.menu.join(" / ")} detail="短時間で整える順番" />
+        <Metric label="今日の合計" value={`${practiceMenu.reduce((sum, item) => sum + item.count, 0)}回`} detail="苦手種目、成功率、直近回数から配分" />
       </div>
       <Panel title="最近の記録">
         <div className="grid gap-2">
@@ -257,17 +264,17 @@ function DailyLogForm({ onAdd }: { onAdd: (log: Omit<PracticeLog, "id">) => void
   return (
     <form onSubmit={submit} className="grid gap-4 md:grid-cols-4">
       <Field label="日付">
-        <input className="input" type="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} />
+        <input className="input" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} />
       </Field>
       <Field label="種目">
-        <select className="input" value={form.discipline} onChange={(e) => setForm({ ...form, discipline: e.target.value as Discipline })}>
+        <select className="input" value={form.discipline} onChange={(event) => setForm({ ...form, discipline: event.target.value as Discipline })}>
           {DISCIPLINES.map((discipline) => (
             <option key={discipline}>{discipline}</option>
           ))}
         </select>
       </Field>
       <Field label="モード">
-        <select className="input" value={form.mode} onChange={(e) => setForm({ ...form, mode: e.target.value as LogMode })}>
+        <select className="input" value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value as LogMode })}>
           {LOG_MODES.map((mode) => (
             <option key={mode} value={mode}>{getModeLabel(mode)}</option>
           ))}
@@ -288,7 +295,7 @@ function DailyLogForm({ onAdd }: { onAdd: (log: Omit<PracticeLog, "id">) => void
         <textarea
           className="input min-h-32 resize-y leading-6"
           value={form.memo}
-          onChange={(e) => setForm({ ...form, memo: e.target.value })}
+          onChange={(event) => setForm({ ...form, memo: event.target.value })}
           placeholder={"・どこでミスしたか\n・何が上手くいったか\n・次回試したいこと"}
           rows={5}
         />
@@ -318,30 +325,30 @@ function ImportPage({ onImport }: { onImport: (logs: Omit<PracticeLog, "id">[]) 
       <Panel title="インポート設定">
         <div className="grid gap-4 md:grid-cols-3">
           <Field label="モード">
-            <select className="input" value={mode} onChange={(e) => setMode(e.target.value as LogMode)}>
+            <select className="input" value={mode} onChange={(event) => setMode(event.target.value as LogMode)}>
               {LOG_MODES.map((item) => (
                 <option key={item} value={item}>{getModeLabel(item)}</option>
               ))}
             </select>
           </Field>
           <Field label="種目">
-            <select className="input" value={discipline} onChange={(e) => setDiscipline(e.target.value as Discipline)}>
+            <select className="input" value={discipline} onChange={(event) => setDiscipline(event.target.value as Discipline)}>
               {DISCIPLINES.map((item) => (
                 <option key={item}>{item}</option>
               ))}
             </select>
           </Field>
           <Field label="日付">
-            <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <input className="input" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
           </Field>
         </div>
         <Field label="貼り付けテキスト">
           <textarea
             className="input mt-4 min-h-56 font-mono text-sm"
             value={text}
-            onChange={(e) => {
+            onChange={(event) => {
               setImported(0);
-              setText(e.target.value);
+              setText(event.target.value);
             }}
             placeholder={mode === "train" ? "Score: 0\nTime: 0.69 sec" : "Time: 48.07s\nScore: 52"}
           />
@@ -360,27 +367,25 @@ function ImportPage({ onImport }: { onImport: (logs: Omit<PracticeLog, "id">[]) 
         {result.logs.length === 0 ? (
           <p className="text-sm text-zinc-600">まだ記録を読み取れていません。</p>
         ) : (
-          <>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="text-xs uppercase text-zinc-500">
-                  <tr>{["日付", "種目", "モード", "スコア", "タイム", "判定"].map((head) => <th key={head} className="py-2 pr-4">{head}</th>)}</tr>
-                </thead>
-                <tbody>
-                  {result.logs.map((log, index) => (
-                    <tr key={`${log.date}-${log.discipline}-${index}`} className="border-t border-zinc-100">
-                      <td className="py-3 pr-4">{log.date}</td>
-                      <td className="py-3 pr-4 font-medium">{log.discipline}</td>
-                      <td className="py-3 pr-4"><ModeBadge mode={log.mode} /></td>
-                      <td className="py-3 pr-4">{log.score}</td>
-                      <td className="py-3 pr-4">{record(log.time)}秒</td>
-                      <td className="py-3 pr-4">{log.success ? "成功" : "失敗"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left text-sm">
+              <thead className="text-xs uppercase text-zinc-500">
+                <tr>{["日付", "種目", "モード", "スコア", "タイム", "判定"].map((head) => <th key={head} className="py-2 pr-4">{head}</th>)}</tr>
+              </thead>
+              <tbody>
+                {result.logs.map((log, index) => (
+                  <tr key={`${log.date}-${log.discipline}-${index}`} className="border-t border-zinc-100">
+                    <td className="py-3 pr-4">{log.date}</td>
+                    <td className="py-3 pr-4 font-medium">{log.discipline}</td>
+                    <td className="py-3 pr-4"><ModeBadge mode={log.mode} /></td>
+                    <td className="py-3 pr-4">{log.score}</td>
+                    <td className="py-3 pr-4">{record(log.time)}秒</td>
+                    <td className="py-3 pr-4">{log.success ? "成功" : "失敗"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         <button
           onClick={importLogs}
@@ -399,11 +404,11 @@ function Analytics({ logs }: { logs: PracticeLog[] }) {
   const [modeFilter, setModeFilter] = useState<LogMode | "all">("all");
   const filteredLogs = useMemo(() => filterLogsByMode(logs, modeFilter), [logs, modeFilter]);
   const stats = useMemo(() => getDisciplineStats(logs, modeFilter), [logs, modeFilter]);
-  const trend = useMemo(() => getRecentTrend(logs, 7, modeFilter), [logs, modeFilter]);
   const weakness = getWeaknessRanking(logs, modeFilter);
+  const windowStats = useMemo(() => getDisciplineWindowStats(logs, modeFilter), [logs, modeFilter]);
 
   return (
-    <Page title="分析" subtitle="モード別に絞り込み、練習本数、成功率、平均タイム、平均スコア、ベスト記録を再計算します。">
+    <Page title="分析" subtitle="モード別に絞り込み、種目別のスコア、タイム、成功率、安定度を確認します。">
       <Panel title="モードフィルタ">
         <div className="flex flex-wrap gap-2">
           {(["all", ...LOG_MODES] as const).map((mode) => (
@@ -419,14 +424,13 @@ function Analytics({ logs }: { logs: PracticeLog[] }) {
           ))}
         </div>
       </Panel>
-      <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="表示中の記録" value={`${filteredLogs.length}`} detail="現在のモード条件" />
-        <Metric label="直近7日の本数" value={`${trend.attempts}`} detail="過去7日" />
-        <Metric label="直近7日の成功率" value={percent(trend.successRate)} detail="現在の調子" />
-        <Metric label="好調な種目" value={trend.bestDiscipline ?? "-"} detail="直近の成功率が最も高い種目" />
+      <div className="grid gap-4 md:grid-cols-3">
+        <Metric label="表示中の記録" value={`${filteredLogs.length}回`} detail="現在のモード条件" />
+        <Metric label="好調な種目" value={stats.filter((item) => item.attempts > 0).sort((a, b) => b.successRate - a.successRate)[0]?.discipline ?? "-"} detail="種目別成功率から判定" />
+        <Metric label="重点候補" value={weakness[0]?.discipline ?? "-"} detail="苦手スコアが高い種目" />
       </div>
       <Panel title="種目別分析">
-        <StatsGrid stats={stats} showRecordDetails />
+        <DisciplineWindowGrid data={windowStats} />
       </Panel>
       <Panel title="苦手種目ランキング">
         <div className="grid gap-3 md:grid-cols-3">
@@ -462,7 +466,7 @@ function Opponents({ opponents, onAdd }: { opponents: Opponent[]; onAdd: (oppone
       <Panel title="対戦相手入力">
         <form onSubmit={submit} className="grid gap-4">
           <Field label="選手名">
-            <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="選手名" />
+            <input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="選手名" />
           </Field>
           <div className="grid gap-3 md:grid-cols-3">
             {DISCIPLINES.map((discipline) => (
@@ -474,7 +478,7 @@ function Opponents({ opponents, onAdd }: { opponents: Opponent[]; onAdd: (oppone
             ))}
           </div>
           <Field label="メモ">
-            <textarea className="input min-h-24" value={form.memo} onChange={(e) => setForm({ ...form, memo: e.target.value })} />
+            <textarea className="input min-h-24" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} />
           </Field>
           <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">対戦相手を追加</button>
         </form>
@@ -508,7 +512,7 @@ function MatchPlan({ data, setData }: { data: CoachData; setData: React.Dispatch
         <select
           className="input max-w-md"
           value={opponent?.id ?? ""}
-          onChange={(e) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: e.target.value } }))}
+          onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}
         >
           {data.opponents.map((item) => (
             <option key={item.id} value={item.id}>{item.name}</option>
@@ -551,7 +555,7 @@ function WeeklyReview({ logs }: { logs: PracticeLog[] }) {
   return (
     <Page title="週次レビュー" subtitle="直近7日を振り返り、来週の重点種目を決めます。">
       <div className="grid gap-4 md:grid-cols-4">
-        <Metric label="今週の本数" value={`${review.attempts}`} detail="直近7日" />
+        <Metric label="今週の回数" value={`${review.attempts}回`} detail="直近7日" />
         <Metric label="最も改善した種目" value={review.improved} detail="成功率の前週比" />
         <Metric label="失敗率が高い種目" value={review.worstFailure} detail="次の修正候補" />
         <Metric label="来週の重点種目" value={review.focus.join(" / ")} detail="先にログを増やす種目" />
@@ -561,7 +565,7 @@ function WeeklyReview({ logs }: { logs: PracticeLog[] }) {
           {review.focus.map((discipline) => (
             <div key={discipline} className={`rounded-lg border p-4 ${getDisciplineTone(discipline)}`}>
               <div className="text-lg font-bold">{discipline}</div>
-              <p className="mt-2 text-sm">毎日2から3本。スピードより先に成功率を戻します。</p>
+              <p className="mt-2 text-sm">毎日2から3回。スピードより先に成功率を戻します。</p>
             </div>
           ))}
           <div className="rounded-lg border border-zinc-200 bg-white p-4">
@@ -577,17 +581,34 @@ function WeeklyReview({ logs }: { logs: PracticeLog[] }) {
 function SettingsView({ data, setData }: { data: CoachData; setData: React.Dispatch<React.SetStateAction<CoachData>> }) {
   const reset = () => setData(sampleData);
   return (
-    <Page title="設定" subtitle="大会日、次の対戦相手、ローカルデータを管理します。">
-      <Panel title="基本設定">
-        <div className="grid gap-4 md:grid-cols-3">
-          <Field label="プレイヤー名">
-            <input className="input" value={data.settings.playerName} onChange={(e) => setData((current) => ({ ...current, settings: { ...current.settings, playerName: e.target.value } }))} />
+    <Page title="設定" subtitle="大会情報、次の対戦相手、ローカルデータを管理します。">
+      <Panel title="大会情報">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="大会名">
+            <input
+              className="input"
+              value={data.settings.tournamentName ?? ""}
+              onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, tournamentName: event.target.value } }))}
+              placeholder="例: 日本大会"
+            />
           </Field>
           <Field label="大会日">
-            <input className="input" type="date" value={data.settings.tournamentDate} onChange={(e) => setData((current) => ({ ...current, settings: { ...current.settings, tournamentDate: e.target.value } }))} />
+            <input
+              className="input"
+              type="date"
+              value={data.settings.tournamentDate}
+              onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, tournamentDate: event.target.value } }))}
+            />
+          </Field>
+        </div>
+      </Panel>
+      <Panel title="基本設定">
+        <div className="grid gap-4 md:grid-cols-2">
+          <Field label="プレイヤー名">
+            <input className="input" value={data.settings.playerName} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, playerName: event.target.value } }))} />
           </Field>
           <Field label="次の対戦相手">
-            <select className="input" value={data.settings.nextOpponentId} onChange={(e) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: e.target.value } }))}>
+            <select className="input" value={data.settings.nextOpponentId} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}>
               {data.opponents.map((opponent) => (
                 <option key={opponent.id} value={opponent.id}>{opponent.name}</option>
               ))}
@@ -627,6 +648,36 @@ function LogsTable({ logs }: { logs: PracticeLog[] }) {
         </table>
       </div>
     </Panel>
+  );
+}
+
+function DisciplineWindowGrid({ data }: { data: ReturnType<typeof getDisciplineWindowStats> }) {
+  return (
+    <div className="grid gap-4">
+      {data.map((item) => (
+        <section key={item.discipline} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+          <h3 className="text-lg font-black">{item.discipline}</h3>
+          <div className="mt-4 grid gap-3 xl:grid-cols-4">
+            {item.windows.map((window) => (
+              <div key={window.size} className="rounded-lg border border-zinc-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-bold">直近{window.size}回</div>
+                  {!window.isEnoughData && <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">データ不足</span>}
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                  <MiniMetric label="平均スコア" value={window.isEnoughData ? record(window.averageScore) : "-"} />
+                  <MiniMetric label="平均タイム" value={window.isEnoughData ? `${record(window.averageTime)}秒` : "-"} />
+                  <MiniMetric label="成功率" value={window.isEnoughData ? percent(window.successRate) : "-"} />
+                  <MiniMetric label="安定度" value={window.isEnoughData ? percent(window.stability) : "-"} />
+                  <MiniMetric label="ベストスコア" value={window.isEnoughData ? record(window.bestScore) : "-"} />
+                  <MiniMetric label="ベストタイム" value={window.isEnoughData ? `${record(window.bestTime)}秒` : "-"} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }
 
@@ -672,7 +723,7 @@ function StatsGrid({ stats, showRecordDetails = false }: { stats: ReturnType<typ
         <div key={item.discipline} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
           <div className="flex items-center justify-between gap-3">
             <h3 className="font-bold">{item.discipline}</h3>
-            <span className="text-sm font-semibold">{item.attempts}本</span>
+            <span className="text-sm font-semibold">{item.attempts}回</span>
           </div>
           <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
             <MiniMetric label="成功率" value={percent(item.successRate)} />
@@ -732,7 +783,7 @@ function NumberField({
         step={step}
         value={value}
         placeholder={placeholder}
-        onChange={(e) => onChange(e.target.value === "" ? "" : Number(e.target.value))}
+        onChange={(event) => onChange(event.target.value === "" ? "" : Number(event.target.value))}
       />
     </Field>
   );
