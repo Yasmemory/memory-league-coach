@@ -43,6 +43,12 @@ type PracticeLogFormState = {
   time: NumberInputValue;
   memo: string;
 };
+type OpponentFormState = {
+  name: string;
+  averages: Record<Discipline, NumberInputValue>;
+  successRates: Record<Discipline, NumberInputValue>;
+  memo: string;
+};
 
 const storageKey = "memory-league-coach:data:v1";
 const todayIso = () => new Date().toISOString().slice(0, 10);
@@ -66,10 +72,10 @@ const emptyLog = (): PracticeLogFormState => ({
   memo: "",
 });
 
-const emptyOpponent = (): Omit<Opponent, "id"> => ({
+const emptyOpponent = (): OpponentFormState => ({
   name: "",
-  averages: { Cards: 30, Images: 50, "International Names": 90, Names: 75, Numbers: 80, Words: 65 },
-  successRates: { Cards: 75, Images: 75, "International Names": 75, Names: 75, Numbers: 75, Words: 75 },
+  averages: { Cards: "", Images: "", "International Names": "", Names: "", Numbers: "", Words: "" },
+  successRates: { Cards: "", Images: "", "International Names": "", Names: "", Numbers: "", Words: "" },
   memo: "",
 });
 
@@ -183,16 +189,17 @@ export function CoachApp({ view }: { view: View }) {
 
 function Dashboard({ data, stats, trend, opponent, mounted, onAdd }: { data: CoachData; stats: ReturnType<typeof getDisciplineStats>; trend: ReturnType<typeof getRecentTrend>; opponent?: Opponent; mounted: boolean; onAdd: (log: Omit<PracticeLog, "id">) => void }) {
   const nextTournament = getNextTournament(data.tournaments ?? []);
-  const until = daysUntil(nextTournament?.date ?? data.settings.tournamentDate);
   const practiceMenu = generatePracticeMenu(data.logs);
   const latest = data.logs.slice(0, 5);
-  const tournamentLabel = nextTournament?.name ? `${nextTournament.name}まで` : data.settings.tournamentName ? `${data.settings.tournamentName}まで` : "大会まで";
-  const tournaments = sortTournaments(data.tournaments ?? []);
+  const upcomingTournaments = sortTournaments(data.tournaments ?? []).filter((tournament) => {
+    const remaining = daysUntil(tournament.date);
+    return remaining === null || remaining >= 0;
+  });
 
   return (
     <Page title="ダッシュボード" subtitle="毎日の入力と、今日やる練習メニューをここに集約します。">
-      <Panel title="今日の練習メニュー">
-        <div className="grid gap-4 lg:grid-cols-[1.5fr_1fr]">
+      <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
+        <Panel title="今日の練習メニュー">
           <div className="grid gap-3 sm:grid-cols-2">
             {practiceMenu.map((item) => (
               <div key={item.discipline} className="rounded-lg border bg-white p-4" style={getDisciplineCardStyle(item.discipline)}>
@@ -202,22 +209,17 @@ function Dashboard({ data, stats, trend, opponent, mounted, onAdd }: { data: Coa
               </div>
             ))}
           </div>
-          <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
-            <div className="text-xs font-semibold text-zinc-500">{tournamentLabel}</div>
-            <div className="mt-2 text-5xl font-black">{until === null ? "-" : Math.max(0, until)}</div>
-            <p className="mt-2 text-sm text-zinc-600">{(nextTournament?.date ?? data.settings.tournamentDate) || "設定で大会日を入力してください。"}</p>
-          </div>
-        </div>
-      </Panel>
-      <Panel title="今日の練習入力"><DailyLogForm onAdd={onAdd} /></Panel>
+        </Panel>
+        <Panel title="大会一覧">
+          {upcomingTournaments.length === 0 ? <p className="text-sm text-zinc-600">未来の大会が登録されていません。</p> : <TournamentList tournaments={upcomingTournaments} nextTournamentId={nextTournament?.id} />}
+        </Panel>
+      </div>
+      <Panel title="練習入力"><DailyLogForm onAdd={onAdd} /></Panel>
       <div className="grid gap-4 lg:grid-cols-3">
         <Metric label="直近の調子" value={mounted ? `${trend.attempts}回` : "--"} detail={mounted ? `${trend.successes}成功 / 直近7日` : "直近7日"} />
         <Metric label="次の対戦相手" value={opponent?.name ?? "未設定"} detail="対戦プランで相手別の練習方針を確認" />
         <Metric label="今日の合計" value={`${practiceMenu.reduce((sum, item) => sum + item.count, 0)}回`} detail="苦手種目、成功率、直近回数から配分" />
       </div>
-      <Panel title="大会一覧">
-        {tournaments.length === 0 ? <p className="text-sm text-zinc-600">大会が登録されていません。</p> : <TournamentList tournaments={tournaments} nextTournamentId={nextTournament?.id} />}
-      </Panel>
       <Panel title="最近の記録"><LogList logs={latest} /></Panel>
       <Panel title="分析"><StatsGrid stats={stats} /></Panel>
     </Page>
@@ -236,27 +238,9 @@ function sortTournaments(tournaments: Tournament[]) {
 }
 
 function TournamentList({ tournaments, nextTournamentId }: { tournaments: Tournament[]; nextTournamentId?: string }) {
-  const upcoming = tournaments.filter((tournament) => {
-    const remaining = daysUntil(tournament.date);
-    return remaining === null || remaining >= 0;
-  });
-  const finished = tournaments.filter((tournament) => {
-    const remaining = daysUntil(tournament.date);
-    return remaining !== null && remaining < 0;
-  });
   return (
-    <div className="space-y-4">
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {upcoming.map((tournament) => <TournamentCard key={tournament.id} tournament={tournament} isNext={tournament.id === nextTournamentId} />)}
-      </div>
-      {finished.length > 0 && (
-        <div>
-          <h3 className="mb-2 text-sm font-bold text-zinc-500">終了済み</h3>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {finished.map((tournament) => <TournamentCard key={tournament.id} tournament={tournament} isNext={false} />)}
-          </div>
-        </div>
-      )}
+    <div className="grid gap-3">
+      {tournaments.map((tournament) => <TournamentCard key={tournament.id} tournament={tournament} isNext={tournament.id === nextTournamentId} />)}
     </div>
   );
 }
@@ -284,7 +268,7 @@ function TournamentCard({ tournament, isNext }: { tournament: Tournament; isNext
 function Practice({ logs, onAdd, onUpdate, onDelete }: { logs: PracticeLog[]; onAdd: (log: Omit<PracticeLog, "id">) => void; onUpdate: (log: PracticeLog) => void; onDelete: (id: string) => void }) {
   return (
     <Page title="練習入力" subtitle="Memory Leagueの1記録を、モードに応じた順番で入力します。">
-      <Panel title="日次ログ入力"><DailyLogForm onAdd={onAdd} /></Panel>
+      <Panel title="練習入力"><DailyLogForm onAdd={onAdd} /></Panel>
       <EditableLogsTable logs={logs} onUpdate={onUpdate} onDelete={onDelete} />
     </Page>
   );
@@ -301,24 +285,27 @@ function DailyLogForm({ onAdd }: { onAdd: (log: Omit<PracticeLog, "id">) => void
   const timeField = <NumberField label="タイム" value={form.time} onChange={(time) => setForm({ ...form, time })} placeholder="例: 48.07" step="0.01" />;
 
   return (
-    <form onSubmit={submit} className="grid gap-4 md:grid-cols-4">
+    <form onSubmit={submit} className="grid gap-4">
       <Field label="日付"><input className="input" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></Field>
-      <Field label="種目">
-        <select className="input" value={form.discipline} onChange={(event) => setForm({ ...form, discipline: event.target.value as Discipline })}>
-          {DISCIPLINES.map((discipline) => <option key={discipline}>{discipline}</option>)}
-        </select>
-        <span className="mt-1"><DisciplineBadge discipline={form.discipline} /></span>
-      </Field>
-      <Field label="モード">
-        <select className="input" value={form.mode} onChange={(event) => setForm({ ...form, mode: event.target.value as LogMode })}>
-          {LOG_MODES.map((mode) => <option key={mode} value={mode}>{getModeLabel(mode)}</option>)}
-        </select>
-      </Field>
-      {form.mode === "train" ? <>{scoreField}{timeField}</> : <>{timeField}{scoreField}</>}
-      <Field label="メモ" className="md:col-span-4">
+      <div className="grid gap-4 xl:grid-cols-[minmax(36rem,1.55fr)_minmax(14rem,0.65fr)_minmax(6.5rem,0.38fr)_minmax(6.5rem,0.38fr)] xl:items-end">
+        <div>
+          <div className="mb-2 text-sm font-medium text-zinc-700">種目</div>
+          <div className="flex flex-wrap gap-2">
+            {DISCIPLINES.map((discipline) => <button key={discipline} type="button" title={discipline} onClick={() => setForm({ ...form, discipline })} className={`rounded-md border px-3 py-2 text-sm font-black transition ${form.discipline === discipline ? "ring-2 ring-zinc-950 ring-offset-1" : "hover:bg-zinc-50"}`} style={getDisciplineBadgeStyle(discipline)}><span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: DISCIPLINE_COLORS[discipline] }} />{discipline === "International Names" ? "IN" : discipline}</span></button>)}
+          </div>
+        </div>
+        <div>
+          <div className="mb-2 text-sm font-medium text-zinc-700">Mode</div>
+          <div className="flex flex-wrap gap-2">
+            {LOG_MODES.map((mode) => <button key={mode} type="button" onClick={() => setForm({ ...form, mode })} className={`min-h-11 rounded-md border px-4 py-2 text-sm font-bold transition ${form.mode === mode ? "border-zinc-950 bg-zinc-950 text-white" : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"}`}>{getModeLabel(mode)}</button>)}
+          </div>
+        </div>
+        {form.mode === "train" ? <>{scoreField}{timeField}</> : <>{timeField}{scoreField}</>}
+      </div>
+      <Field label="メモ">
         <textarea className="input min-h-32 resize-y leading-6" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} placeholder={"・どこでミスしたか\n・何が上手くいったか\n・次回試したいこと"} rows={5} />
       </Field>
-      <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white md:col-span-4">記録を追加</button>
+      <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">記録を追加</button>
     </form>
   );
 }
@@ -402,7 +389,11 @@ function Opponents({ opponents, onAdd }: { opponents: Opponent[]; onAdd: (oppone
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.name.trim()) return;
-    onAdd(form);
+    onAdd({
+      ...form,
+      averages: normalizeOpponentNumbers(form.averages),
+      successRates: normalizeOpponentNumbers(form.successRates),
+    });
     setForm(emptyOpponent());
   };
   return (
@@ -410,14 +401,18 @@ function Opponents({ opponents, onAdd }: { opponents: Opponent[]; onAdd: (oppone
       <Panel title="対戦相手入力">
         <form onSubmit={submit} className="grid gap-4">
           <Field label="選手名"><input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="選手名" /></Field>
-          <div className="grid gap-3 md:grid-cols-3">{DISCIPLINES.map((discipline) => <div key={discipline} className="rounded-lg border p-3" style={getDisciplineCardStyle(discipline)}><DisciplineBadge discipline={discipline} /><NumberField label="平均タイム" value={form.averages[discipline]} onChange={(value) => setForm({ ...form, averages: { ...form.averages, [discipline]: value === "" ? 0 : value } })} step="0.1" /><NumberField label="成功率" value={form.successRates[discipline]} onChange={(value) => setForm({ ...form, successRates: { ...form.successRates, [discipline]: value === "" ? 0 : value } })} step="1" /></div>)}</div>
+          <div className="grid gap-3 md:grid-cols-3">{DISCIPLINES.map((discipline) => <div key={discipline} className="rounded-lg border p-3" style={getDisciplineCardStyle(discipline)}><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><NumberField label="Time" value={form.averages[discipline]} onChange={(value) => setForm({ ...form, averages: { ...form.averages, [discipline]: value } })} placeholder="例: 48.07" step="0.01" /><NumberField label="Score" value={form.successRates[discipline]} onChange={(value) => setForm({ ...form, successRates: { ...form.successRates, [discipline]: value } })} placeholder="例: 52" step="0.1" /></div>)}</div>
           <Field label="メモ"><textarea className="input min-h-24" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} /></Field>
           <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">対戦相手を追加</button>
         </form>
       </Panel>
-      <div className="grid gap-4 lg:grid-cols-2">{opponents.map((opponent) => <Panel key={opponent.id} title={opponent.name}><div className="grid gap-2 sm:grid-cols-2">{DISCIPLINES.map((discipline) => <div key={discipline} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm"><DisciplineBadge discipline={discipline} /><span className="font-semibold">{record(opponent.averages[discipline])}秒 / {percent(opponent.successRates[discipline])}</span></div>)}</div><p className="mt-4 text-sm text-zinc-600">{opponent.memo}</p></Panel>)}</div>
+      <div className="grid gap-4 lg:grid-cols-2">{opponents.map((opponent) => <Panel key={opponent.id} title={opponent.name}><div className="grid gap-2 sm:grid-cols-2">{DISCIPLINES.map((discipline) => <div key={discipline} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm"><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><span className="font-semibold">{record(opponent.averages[discipline])}秒 / {percent(opponent.successRates[discipline])}</span></div>)}</div><p className="mt-4 text-sm text-zinc-600">{opponent.memo}</p></Panel>)}</div>
     </Page>
   );
+}
+
+function normalizeOpponentNumbers(values: Record<Discipline, NumberInputValue>) {
+  return Object.fromEntries(DISCIPLINES.map((discipline) => [discipline, values[discipline] === "" ? 0 : values[discipline]])) as Record<Discipline, number>;
 }
 
 function MatchPlan({ data, setData }: { data: CoachData; setData: React.Dispatch<React.SetStateAction<CoachData>> }) {
@@ -619,16 +614,17 @@ function ModeBadge({ mode }: { mode?: LogMode }) {
   return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{getModeLabel(mode)}</span>;
 }
 
-function DisciplineBadge({ discipline }: { discipline: Discipline }) {
-  return <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-black" style={getDisciplineBadgeStyle(discipline)}><span className="h-2 w-2 rounded-full" style={{ backgroundColor: DISCIPLINE_COLORS[discipline] }} />{discipline}</span>;
+function DisciplineBadge({ discipline, compact = false }: { discipline: Discipline; compact?: boolean }) {
+  const label = compact && discipline === "International Names" ? "Inter" : discipline;
+  return <span className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs font-black" title={discipline} style={getDisciplineBadgeStyle(discipline)}><span className="h-2 w-2 rounded-full" style={{ backgroundColor: DISCIPLINE_COLORS[discipline] }} />{label}</span>;
 }
 
 function getDisciplineBadgeStyle(discipline: Discipline): React.CSSProperties {
   const color = DISCIPLINE_COLORS[discipline];
   return {
-    backgroundColor: `${color}1A`,
-    borderColor: `${color}66`,
-    color: getReadableTextColor(color),
+    backgroundColor: `${color}1F`,
+    borderColor: `${color}80`,
+    color,
   };
 }
 
@@ -642,12 +638,8 @@ function getDisciplineCardStyle(discipline: Discipline): React.CSSProperties {
   };
 }
 
-function getReadableTextColor(color: string) {
-  return color === DISCIPLINE_COLORS.Images || color === DISCIPLINE_COLORS["International Names"] ? "#3f3f46" : color;
-}
-
-function Page({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
-  return <div className="space-y-5"><section className="rounded-xl border border-zinc-200 bg-white p-5"><h1 className="text-2xl font-black tracking-normal sm:text-3xl">{title}</h1><p className="mt-2 max-w-3xl text-sm text-zinc-600 sm:text-base">{subtitle}</p></section>{children}</div>;
+function Page({ children }: { title: string; subtitle: string; children: React.ReactNode }) {
+  return <div className="space-y-5">{children}</div>;
 }
 
 function Panel({ title, children }: { title: string; children: React.ReactNode }) {

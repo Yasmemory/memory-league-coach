@@ -40,3 +40,14 @@ textarea {
   border-color: #18181b;
   box-shadow: 0 0 0 3px rgb(24 24 27 / 0.12);
 }
+
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
