@@ -11,6 +11,15 @@ export const DISCIPLINES = EVENT_ORDER;
 
 export type Discipline = (typeof DISCIPLINES)[number];
 
+export const DISCIPLINE_COLORS: Record<Discipline, string> = {
+  Cards: "#DB2828",
+  Images: "#FBBD08",
+  "International Names": "#A6CC18",
+  Names: "#21BA45",
+  Numbers: "#1F85D0",
+  Words: "#A333C8",
+};
+
 export const LOG_MODES = ["train", "rated", "official"] as const;
 
 export type LogMode = (typeof LOG_MODES)[number];

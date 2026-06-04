@@ -78,6 +78,20 @@ export const sampleTournaments: Tournament[] = [
     goal: "CardsとImagesを確実に取る",
     memo: "試合前はInternational Namesを短く反復。",
   },
+  {
+    id: "tournament-online",
+    name: "オンラインリーグ",
+    date: isoDaysAgo(-45),
+    goal: "RatedのNumbersを安定させる",
+    memo: "直前週はWordsを軽めにして疲労を残さない。",
+  },
+  {
+    id: "tournament-finished",
+    name: "春季練習会",
+    date: isoDaysAgo(18),
+    goal: "全種目で成功ログを残す",
+    memo: "振り返り用の終了済み大会。",
+  },
 ];
 
 export const sampleData: CoachData = {
