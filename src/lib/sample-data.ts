@@ -1,7 +1,7 @@
 import { normalizeMemoryLeagueLog } from "@/app/shared";
-import { CoachData, DISCIPLINES, Opponent, PracticeLog } from "./types";
+import { CoachData, DISCIPLINES, Opponent, PracticeLog, Tournament } from "./types";
 
-const today = new Date();
+const today = new Date("2026-06-04T00:00:00.000Z");
 const isoDaysAgo = (days: number) => {
   const date = new Date(today);
   date.setDate(today.getDate() - days);
@@ -70,9 +70,20 @@ export const sampleOpponents: Opponent[] = [
   },
 ];
 
+export const sampleTournaments: Tournament[] = [
+  {
+    id: "tournament-japan",
+    name: "日本大会",
+    date: isoDaysAgo(-21),
+    goal: "CardsとImagesを確実に取る",
+    memo: "試合前はInternational Namesを短く反復。",
+  },
+];
+
 export const sampleData: CoachData = {
   logs: sampleLogs,
   opponents: sampleOpponents,
+  tournaments: sampleTournaments,
   settings: {
     tournamentName: "日本大会",
     tournamentDate: isoDaysAgo(-21),

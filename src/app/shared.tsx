@@ -1,4 +1,4 @@
-import { Discipline, DISCIPLINES, LogMode, LOG_MODES, PracticeLog } from "@/lib/types";
+import { CoachData, Discipline, DISCIPLINES, LogMode, LOG_MODES, PracticeLog, Tournament } from "@/lib/types";
 
 export type ImportPreviewLog = {
   date: string;
@@ -81,6 +81,31 @@ export function normalizeStoredLog(log: PracticeLog): PracticeLog {
     averageRecord: toFiniteNumber(log.averageRecord, time),
     bestRecord: toFiniteNumber(log.bestRecord, time),
   };
+}
+
+export function getNextTournament(tournaments: Tournament[]) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return [...tournaments]
+    .filter((tournament) => tournament.date && new Date(`${tournament.date}T00:00:00`) >= today)
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
+}
+
+export function saveTournaments(data: CoachData, tournaments: Tournament[]): CoachData {
+  return { ...data, tournaments };
+}
+
+export function updatePracticeLog(logs: PracticeLog[], updatedLog: PracticeLog) {
+  return logs.map((log) => (log.id === updatedLog.id ? normalizeStoredLog(updatedLog) : normalizeStoredLog(log)));
+}
+
+export function updatePracticeLogInline(logs: PracticeLog[], updatedLog: PracticeLog) {
+  return updatePracticeLog(logs, updatedLog);
+}
+
+export function deletePracticeLog(logs: PracticeLog[], id: string) {
+  return logs.filter((log) => log.id !== id).map(normalizeStoredLog);
 }
 
 export function parseMemoryLeagueImportText(input: {

@@ -29,6 +29,74 @@ export function filterLogsByMode(logs: PracticeLog[], mode: LogMode | "all") {
   return mode === "all" ? normalized : normalized.filter((log) => log.mode === mode);
 }
 
+export function getFilteredLogsByEvent(logs: PracticeLog[], discipline: Discipline | "all") {
+  const normalized = logs.map(normalizeStoredLog);
+  return discipline === "all" ? normalized : normalized.filter((log) => log.discipline === discipline);
+}
+
+export function getFilteredLogsByDateRange(logs: PracticeLog[], range: { from?: string; to?: string }) {
+  const from = range.from ? new Date(`${range.from}T00:00:00`) : undefined;
+  const to = range.to ? new Date(`${range.to}T23:59:59`) : undefined;
+
+  return logs.map(normalizeStoredLog).filter((log) => {
+    const date = new Date(`${log.date}T12:00:00`);
+    if (from && date < from) return false;
+    if (to && date > to) return false;
+    return true;
+  });
+}
+
+export function getAvailableMonths(logs: PracticeLog[]) {
+  return [...new Set(logs.map((log) => log.date.slice(0, 7)).filter(Boolean))].sort((a, b) => b.localeCompare(a));
+}
+
+export function filterLogsByMonth(logs: PracticeLog[], month: string) {
+  return logs.map(normalizeStoredLog).filter((log) => log.date.startsWith(month));
+}
+
+export function getAnalyticsFilterState(input: {
+  logs: PracticeLog[];
+  mode: LogMode | "all";
+  discipline: Discipline | "all";
+  period: "all" | "7" | "30" | "90" | "custom" | `month:${string}`;
+  customFrom?: string;
+  customTo?: string;
+}) {
+  let filtered = input.logs.map(normalizeStoredLog);
+  if (input.period.startsWith("month:")) {
+    filtered = filterLogsByMonth(filtered, input.period.replace("month:", ""));
+  } else if (input.period !== "all") {
+    if (input.period === "custom") {
+      filtered = getFilteredLogsByDateRange(filtered, { from: input.customFrom, to: input.customTo });
+    } else {
+      const from = new Date();
+      from.setDate(from.getDate() - Number(input.period) + 1);
+      filtered = getFilteredLogsByDateRange(filtered, { from: from.toISOString().slice(0, 10), to: new Date().toISOString().slice(0, 10) });
+    }
+  }
+  filtered = filterLogsByMode(filtered, input.mode);
+  filtered = getFilteredLogsByEvent(filtered, input.discipline);
+  return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
+export function calculateEventStats(discipline: Discipline, logs: PracticeLog[], mode: LogMode | "all" = "all") {
+  return getDisciplineStats(logs, mode).find((stat) => stat.discipline === discipline) ?? {
+    discipline,
+    attempts: 0,
+    successes: 0,
+    failures: 0,
+    successRate: 0,
+    averageRecord: 0,
+    bestRecord: 0,
+    averageScore: 0,
+    averageTime: 0,
+    bestScore: 0,
+    bestTime: 0,
+    stability: 0,
+    weaknessScore: 0,
+  };
+}
+
 export function getDisciplineStats(logs: PracticeLog[], mode: LogMode | "all" = "all"): DisciplineStats[] {
   const normalized = filterLogsByMode(logs, mode);
 

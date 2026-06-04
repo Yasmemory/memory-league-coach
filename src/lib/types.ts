@@ -54,6 +54,14 @@ export type Opponent = {
   memo: string;
 };
 
+export type Tournament = {
+  id: string;
+  name: string;
+  date: string;
+  goal?: string;
+  memo?: string;
+};
+
 export type Settings = {
   tournamentName?: string;
   tournamentDate: string;
@@ -64,5 +72,6 @@ export type Settings = {
 export type CoachData = {
   logs: PracticeLog[];
   opponents: Opponent[];
+  tournaments?: Tournament[];
   settings: Settings;
 };
