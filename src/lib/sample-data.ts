@@ -28,6 +28,8 @@ export const sampleLogs: PracticeLog[] = [
     discipline: discipline as PracticeLog["discipline"],
     mode: mode as PracticeLog["mode"],
     officialTournamentId: mode === "official" ? (index % 2 === 0 ? "official-japan" : "official-online") : undefined,
+    officialRound: mode === "official" ? (index % 2 === 0 ? "QF" : "GL") : undefined,
+    opponentName: mode === "official" ? (index % 2 === 0 ? "John" : "Aoi") : undefined,
     score: Number(score),
     time: Number(time),
     memo: String(memo),

@@ -41,6 +41,8 @@ export function normalizeMemoryLeagueLog(input: {
   discipline: Discipline;
   mode?: LogMode;
   officialTournamentId?: string;
+  officialRound?: string;
+  opponentName?: string;
   score?: number;
   time?: number;
   memo?: string;
@@ -55,6 +57,8 @@ export function normalizeMemoryLeagueLog(input: {
     discipline: input.discipline,
     mode,
     officialTournamentId: mode === "official" ? input.officialTournamentId || undefined : undefined,
+    officialRound: mode === "official" ? input.officialRound?.trim() || undefined : undefined,
+    opponentName: mode === "official" ? input.opponentName?.trim() || undefined : undefined,
     score,
     time,
     attempts: 1,
@@ -76,6 +80,8 @@ export function normalizeStoredLog(log: PracticeLog): PracticeLog {
     ...log,
     mode,
     officialTournamentId: mode === "official" ? log.officialTournamentId : undefined,
+    officialRound: mode === "official" ? log.officialRound : undefined,
+    opponentName: mode === "official" ? log.opponentName : undefined,
     score,
     time,
     attempts: toFiniteNumber(log.attempts, 1),

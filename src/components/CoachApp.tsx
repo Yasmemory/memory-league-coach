@@ -18,7 +18,7 @@ import {
   record,
 } from "@/lib/analytics";
 import { sampleData } from "@/lib/sample-data";
-import { CoachData, Discipline, DISCIPLINE_COLORS, DISCIPLINES, LOG_MODES, LogMode, OfficialTournament, Opponent, PracticeLog, Tournament } from "@/lib/types";
+import { CoachData, Discipline, DISCIPLINE_COLORS, DISCIPLINES, LOG_MODES, LogMode, OFFICIAL_ROUNDS, OfficialTournament, Opponent, PracticeLog, Tournament } from "@/lib/types";
 import {
   deletePracticeLog,
   deleteOfficialTournament,
@@ -49,6 +49,8 @@ type PracticeLogFormState = {
   discipline: Discipline;
   mode: LogMode;
   officialTournamentId?: string;
+  officialRound?: string;
+  opponentName?: string;
   score: NumberInputValue;
   time: NumberInputValue;
   memo: string;
@@ -77,7 +79,7 @@ const navItems: { href: string; labelKey: TranslationKey; view: View }[] = [
 const translations = {
   ja: {
     dashboard: "ダッシュボード",
-    practiceInput: "練習入力",
+    practiceInput: "ログ入力",
     analytics: "分析",
     opponents: "対戦相手",
     matchPlan: "対戦プラン",
@@ -116,6 +118,8 @@ const translations = {
     officialTournamentUnset: "大会未設定",
     officialTournamentRegisterHint: "設定ページで大会を登録してください。",
     officialTournamentAll: "Official 全体",
+    officialRound: "ラウンド",
+    opponentName: "対戦相手",
     actions: "操作",
     save: "保存",
     delete: "削除",
@@ -123,7 +127,7 @@ const translations = {
     cancel: "キャンセル",
     score: "スコア",
     time: "タイム",
-    addRecord: "記録を追加",
+    addRecord: "追加",
     playerName: "選手名",
     opponentInput: "対戦相手入力",
     addOpponent: "対戦相手を追加",
@@ -165,7 +169,7 @@ const translations = {
   },
   en: {
     dashboard: "Dashboard",
-    practiceInput: "Practice Input",
+    practiceInput: "Log Input",
     analytics: "Analytics",
     opponents: "Opponents",
     matchPlan: "Match Plan",
@@ -204,6 +208,8 @@ const translations = {
     officialTournamentUnset: "Tournament Not Set",
     officialTournamentRegisterHint: "Register a tournament in Settings.",
     officialTournamentAll: "All Official",
+    officialRound: "Round",
+    opponentName: "Opponent",
     actions: "Actions",
     save: "Save",
     delete: "Delete",
@@ -211,7 +217,7 @@ const translations = {
     cancel: "Cancel",
     score: "Score",
     time: "Time",
-    addRecord: "Add Record",
+    addRecord: "Add",
     playerName: "Player Name",
     opponentInput: "Opponent Input",
     addOpponent: "Add Opponent",
@@ -549,16 +555,27 @@ function DailyLogForm({ officialTournaments, onAdd }: { officialTournaments: Off
         {form.mode === "train" ? <>{scoreField}{timeField}</> : <>{timeField}{scoreField}</>}
       </div>
       {form.mode === "official" && (
-        <Field label={t("officialTournament")} className="max-w-md">
-          {officialTournaments.length > 0 ? (
-            <select className="input" value={form.officialTournamentId ?? ""} onChange={(event) => setForm({ ...form, officialTournamentId: event.target.value || undefined })}>
-              <option value="">{t("officialTournamentUnset")}</option>
-              {officialTournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
+        <div className="grid gap-4 md:grid-cols-3">
+          <Field label={t("officialTournament")}>
+            {officialTournaments.length > 0 ? (
+              <select className="input" value={form.officialTournamentId ?? ""} onChange={(event) => setForm({ ...form, officialTournamentId: event.target.value || undefined })}>
+                <option value="">{t("officialTournamentUnset")}</option>
+                {officialTournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
+              </select>
+            ) : (
+              <Link href="/settings" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100">{t("officialTournamentRegisterHint")}</Link>
+            )}
+          </Field>
+          <Field label={t("officialRound")}>
+            <select className="input" value={form.officialRound ?? ""} onChange={(event) => setForm({ ...form, officialRound: event.target.value || undefined })}>
+              <option value="">-</option>
+              {OFFICIAL_ROUNDS.map((round) => <option key={round} value={round}>{round}</option>)}
             </select>
-          ) : (
-            <Link href="/settings" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-900 hover:bg-amber-100">{t("officialTournamentRegisterHint")}</Link>
-          )}
-        </Field>
+          </Field>
+          <Field label={t("opponentName")}>
+            <input className="input" value={form.opponentName ?? ""} onChange={(event) => setForm({ ...form, opponentName: event.target.value })} placeholder="John" />
+          </Field>
+        </div>
       )}
       <Field label={t("memo")}>
         <textarea className="input min-h-32 resize-y leading-6" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} placeholder={"・どこでミスしたか\n・何が上手くいったか\n・次回試したいこと"} rows={5} />
@@ -845,7 +862,7 @@ function EditableLogsTable({ logs, officialTournaments, onUpdate, onDelete }: { 
   const [draft, setDraft] = useState<PracticeLogFormState>(emptyLog);
   const startEdit = (log: PracticeLog) => {
     setEditingId(log.id);
-    setDraft({ date: log.date, discipline: log.discipline, mode: log.mode ?? "train", officialTournamentId: log.officialTournamentId, score: log.score ?? "", time: log.time ?? "", memo: log.memo });
+    setDraft({ date: log.date, discipline: log.discipline, mode: log.mode ?? "train", officialTournamentId: log.officialTournamentId, officialRound: log.officialRound, opponentName: log.opponentName, score: log.score ?? "", time: log.time ?? "", memo: log.memo });
   };
   const save = (id: string) => {
     const normalized = normalizeMemoryLeagueLog({ ...draft, score: draft.score === "" ? undefined : draft.score, time: draft.time === "" ? undefined : draft.time });
@@ -893,15 +910,15 @@ function LogTable({
   const editInputClass = "h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 text-sm outline-none focus:border-zinc-950";
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200">
-      <table className="min-w-[980px] table-fixed divide-y divide-zinc-200 text-left">
+      <table className="min-w-[1120px] table-fixed divide-y divide-zinc-200 text-left">
         <colgroup>
           <col className="w-32" />
           <col className="w-44" />
-          <col className="w-28" />
+          <col className="w-64" />
           <col className="w-24" />
           <col className="w-24" />
           <col className="w-20" />
-          <col className={canEdit ? "w-64" : "w-80"} />
+          <col className={canEdit ? "w-56" : "w-72"} />
           <col className="w-32" />
         </colgroup>
         <thead className="bg-zinc-50 text-xs font-bold text-zinc-500">
@@ -923,13 +940,20 @@ function LogTable({
                     <div className="grid gap-2">
                       <select className={editInputClass} value={draft.mode} onChange={(event) => onDraftChange({ ...draft, mode: event.target.value as LogMode })} aria-label="Mode">{LOG_MODES.map((mode) => <option key={mode} value={mode}>{getModeLabel(mode)}</option>)}</select>
                       {draft.mode === "official" && (
-                        <select className={editInputClass} value={draft.officialTournamentId ?? ""} onChange={(event) => onDraftChange({ ...draft, officialTournamentId: event.target.value || undefined })} aria-label={t("officialTournament")}>
-                          <option value="">{t("officialTournamentUnset")}</option>
-                          {officialTournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
-                        </select>
+                        <>
+                          <select className={editInputClass} value={draft.officialTournamentId ?? ""} onChange={(event) => onDraftChange({ ...draft, officialTournamentId: event.target.value || undefined })} aria-label={t("officialTournament")}>
+                            <option value="">{t("officialTournamentUnset")}</option>
+                            {officialTournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
+                          </select>
+                          <select className={editInputClass} value={draft.officialRound ?? ""} onChange={(event) => onDraftChange({ ...draft, officialRound: event.target.value || undefined })} aria-label={t("officialRound")}>
+                            <option value="">-</option>
+                            {OFFICIAL_ROUNDS.map((round) => <option key={round} value={round}>{round}</option>)}
+                          </select>
+                          <input className={editInputClass} value={draft.opponentName ?? ""} onChange={(event) => onDraftChange({ ...draft, opponentName: event.target.value })} aria-label={t("opponentName")} placeholder="John" />
+                        </>
                       )}
                     </div>
-                  ) : <ModeBadge mode={log.mode} officialTournamentName={log.mode === "official" ? getOfficialTournamentName(officialTournaments, log.officialTournamentId) : undefined} />}
+                  ) : <ModeBadge mode={log.mode} officialTournamentName={log.mode === "official" ? getOfficialTournamentName(officialTournaments, log.officialTournamentId) : undefined} officialRound={log.officialRound} opponentName={log.opponentName} />}
                 </td>
                 <td className={`${cellClass} font-semibold`}>
                   {isEditing ? <input className={editInputClass} type="number" min="0" step="1" value={draft.score} onChange={(event) => onDraftChange({ ...draft, score: event.target.value === "" ? "" : Number(event.target.value) })} aria-label="Score" /> : log.score ?? 0}
@@ -994,8 +1018,9 @@ function formatMonth(month: string) {
   return `${year}年${Number(rawMonth)}月`;
 }
 
-function ModeBadge({ mode, officialTournamentName }: { mode?: LogMode; officialTournamentName?: string }) {
-  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{getModeLabel(mode)}{mode === "official" && officialTournamentName ? ` / ${officialTournamentName}` : ""}</span>;
+function ModeBadge({ mode, officialTournamentName, officialRound, opponentName }: { mode?: LogMode; officialTournamentName?: string; officialRound?: string; opponentName?: string }) {
+  const details = mode === "official" ? [officialTournamentName, officialRound, opponentName ? `vs ${opponentName}` : undefined].filter(Boolean) : [];
+  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{[getModeLabel(mode), ...details].join(" / ")}</span>;
 }
 
 function DisciplineBadge({ discipline, compact = false }: { discipline: Discipline; compact?: boolean }) {

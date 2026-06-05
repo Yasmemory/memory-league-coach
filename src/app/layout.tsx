@@ -11,6 +11,24 @@ export const metadata: Metadata = {
   },
 };
 
+const themeInitScript = `
+(() => {
+  try {
+    const saved = localStorage.getItem("memory-league-coach:ui:v1");
+    const theme = saved ? JSON.parse(saved).theme : "light";
+    if (theme === "dark") {
+      document.documentElement.classList.add("dark");
+      document.documentElement.dataset.theme = "dark";
+    } else {
+      document.documentElement.classList.remove("dark");
+      document.documentElement.dataset.theme = "light";
+    }
+  } catch {
+    document.documentElement.dataset.theme = "light";
+  }
+})();
+`;
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -20,7 +38,11 @@ export default function RootLayout({
     <html
       lang="ja"
       className="h-full antialiased"
+      suppressHydrationWarning
     >
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body className="min-h-full flex flex-col">{children}</body>
     </html>
   );

@@ -24,12 +24,18 @@ export const LOG_MODES = ["train", "rated", "official"] as const;
 
 export type LogMode = (typeof LOG_MODES)[number];
 
+export const OFFICIAL_ROUNDS = ["GL", "Qualifier", "R16", "QF", "SF", "F"] as const;
+
+export type OfficialRound = (typeof OFFICIAL_ROUNDS)[number];
+
 export type PracticeLog = {
   id: string;
   date: string;
   discipline: Discipline;
   mode?: LogMode;
   officialTournamentId?: string;
+  officialRound?: string;
+  opponentName?: string;
   score?: number;
   time?: number;
   attempts: number;
