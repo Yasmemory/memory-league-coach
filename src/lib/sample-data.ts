@@ -1,5 +1,5 @@
 import { normalizeMemoryLeagueLog } from "@/app/shared";
-import { CoachData, DISCIPLINES, Opponent, PracticeLog, Tournament } from "./types";
+import { CoachData, DISCIPLINES, OfficialTournament, Opponent, PracticeLog, Tournament } from "./types";
 
 const today = new Date("2026-06-04T00:00:00.000Z");
 const isoDaysAgo = (days: number) => {
@@ -27,6 +27,7 @@ export const sampleLogs: PracticeLog[] = [
     date: isoDaysAgo(Number(daysAgo)),
     discipline: discipline as PracticeLog["discipline"],
     mode: mode as PracticeLog["mode"],
+    officialTournamentId: mode === "official" ? (index % 2 === 0 ? "official-japan" : "official-online") : undefined,
     score: Number(score),
     time: Number(time),
     memo: String(memo),
@@ -94,10 +95,26 @@ export const sampleTournaments: Tournament[] = [
   },
 ];
 
+export const sampleOfficialTournaments: OfficialTournament[] = [
+  {
+    id: "official-japan",
+    name: "日本大会",
+    date: isoDaysAgo(-21),
+    memo: "国内大会のOfficial記録。",
+  },
+  {
+    id: "official-online",
+    name: "Memory League Online Championship",
+    date: isoDaysAgo(-45),
+    memo: "オンライン公式戦。",
+  },
+];
+
 export const sampleData: CoachData = {
   logs: sampleLogs,
   opponents: sampleOpponents,
   tournaments: sampleTournaments,
+  officialTournaments: sampleOfficialTournaments,
   settings: {
     tournamentName: "日本大会",
     tournamentDate: isoDaysAgo(-21),

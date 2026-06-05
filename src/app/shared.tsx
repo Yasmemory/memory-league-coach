@@ -1,4 +1,4 @@
-import { CoachData, Discipline, DISCIPLINES, LogMode, LOG_MODES, PracticeLog, Tournament } from "@/lib/types";
+import { CoachData, Discipline, DISCIPLINES, LogMode, LOG_MODES, OfficialTournament, PracticeLog, Tournament } from "@/lib/types";
 
 export type ImportPreviewLog = {
   date: string;
@@ -40,6 +40,7 @@ export function normalizeMemoryLeagueLog(input: {
   date: string;
   discipline: Discipline;
   mode?: LogMode;
+  officialTournamentId?: string;
   score?: number;
   time?: number;
   memo?: string;
@@ -53,6 +54,7 @@ export function normalizeMemoryLeagueLog(input: {
     date: input.date,
     discipline: input.discipline,
     mode,
+    officialTournamentId: mode === "official" ? input.officialTournamentId || undefined : undefined,
     score,
     time,
     attempts: 1,
@@ -73,6 +75,7 @@ export function normalizeStoredLog(log: PracticeLog): PracticeLog {
   return {
     ...log,
     mode,
+    officialTournamentId: mode === "official" ? log.officialTournamentId : undefined,
     score,
     time,
     attempts: toFiniteNumber(log.attempts, 1),
@@ -94,6 +97,38 @@ export function getNextTournament(tournaments: Tournament[]) {
 
 export function saveTournaments(data: CoachData, tournaments: Tournament[]): CoachData {
   return { ...data, tournaments };
+}
+
+export function getOfficialTournaments(data: CoachData) {
+  return data.officialTournaments ?? [];
+}
+
+export function saveOfficialTournaments(data: CoachData, officialTournaments: OfficialTournament[]): CoachData {
+  return { ...data, officialTournaments };
+}
+
+export function getOfficialTournamentName(officialTournaments: OfficialTournament[], officialTournamentId?: string) {
+  if (!officialTournamentId) return "大会未設定";
+  return officialTournaments.find((tournament) => tournament.id === officialTournamentId)?.name ?? "大会未設定";
+}
+
+export function filterLogsByOfficialTournament(logs: PracticeLog[], officialTournamentId: string | "all" | "unset") {
+  const normalized = logs.map(normalizeStoredLog);
+  if (officialTournamentId === "all") return normalized;
+  if (officialTournamentId === "unset") return normalized.filter((log) => log.mode === "official" && !log.officialTournamentId);
+  return normalized.filter((log) => log.mode === "official" && log.officialTournamentId === officialTournamentId);
+}
+
+export function updateOfficialTournament(officialTournaments: OfficialTournament[], updatedTournament: OfficialTournament) {
+  return officialTournaments.map((tournament) => (tournament.id === updatedTournament.id ? updatedTournament : tournament));
+}
+
+export function deleteOfficialTournament(data: CoachData, id: string): CoachData {
+  return {
+    ...data,
+    officialTournaments: getOfficialTournaments(data).filter((tournament) => tournament.id !== id),
+    logs: data.logs.map((log) => (log.officialTournamentId === id ? { ...log, officialTournamentId: undefined } : log)),
+  };
 }
 
 export function updatePracticeLog(logs: PracticeLog[], updatedLog: PracticeLog) {

@@ -29,6 +29,7 @@ export type PracticeLog = {
   date: string;
   discipline: Discipline;
   mode?: LogMode;
+  officialTournamentId?: string;
   score?: number;
   time?: number;
   attempts: number;
@@ -71,6 +72,13 @@ export type Tournament = {
   memo?: string;
 };
 
+export type OfficialTournament = {
+  id: string;
+  name: string;
+  date: string;
+  memo?: string;
+};
+
 export type Settings = {
   tournamentName?: string;
   tournamentDate: string;
@@ -82,5 +90,6 @@ export type CoachData = {
   logs: PracticeLog[];
   opponents: Opponent[];
   tournaments?: Tournament[];
+  officialTournaments?: OfficialTournament[];
   settings: Settings;
 };

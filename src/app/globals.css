@@ -18,6 +18,12 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+:root.dark {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  color-scheme: dark;
+}
+
 button,
 input,
 select,
@@ -39,6 +45,111 @@ textarea {
 .input:focus {
   border-color: #18181b;
   box-shadow: 0 0 0 3px rgb(24 24 27 / 0.12);
+}
+
+.theme-dark {
+  background: #09090b;
+  color: #f4f4f5;
+}
+
+.theme-dark header,
+.theme-dark .bg-white,
+.theme-dark .bg-white\/95 {
+  background-color: rgb(24 24 27 / 0.96);
+}
+
+.theme-dark .bg-stone-50,
+.theme-dark .bg-zinc-50 {
+  background-color: #09090b;
+}
+
+.theme-dark .bg-zinc-100 {
+  background-color: #27272a;
+}
+
+.theme-dark .bg-zinc-950 {
+  background-color: #f4f4f5;
+}
+
+.theme-dark .text-zinc-950,
+.theme-dark .text-zinc-800,
+.theme-dark .text-zinc-700,
+.theme-dark .text-zinc-600,
+.theme-dark .text-zinc-500 {
+  color: #e4e4e7;
+}
+
+.theme-dark .text-white {
+  color: #18181b;
+}
+
+.theme-dark .text-zinc-400 {
+  color: #a1a1aa;
+}
+
+.theme-dark .border-zinc-100,
+.theme-dark .border-zinc-200,
+.theme-dark .border-zinc-300,
+.theme-dark .divide-zinc-100,
+.theme-dark .divide-zinc-200 {
+  border-color: #3f3f46;
+}
+
+.theme-dark .shadow-zinc-100 {
+  --tw-shadow-color: rgb(0 0 0 / 0.35);
+}
+
+.theme-dark .input,
+.theme-dark input,
+.theme-dark select,
+.theme-dark textarea {
+  border-color: #3f3f46;
+  background-color: #18181b;
+  color: #f4f4f5;
+}
+
+.theme-dark .input::placeholder {
+  color: #71717a;
+}
+
+.theme-dark .input:focus {
+  border-color: #f4f4f5;
+  box-shadow: 0 0 0 3px rgb(244 244 245 / 0.16);
+}
+
+.theme-dark table,
+.theme-dark tbody,
+.theme-dark thead {
+  background-color: #18181b;
+}
+
+.theme-dark tr:hover {
+  background-color: #27272a;
+}
+
+.theme-dark .hover\:bg-zinc-50:hover,
+.theme-dark .hover\:bg-white:hover,
+.theme-dark .hover\:bg-zinc-100:hover {
+  background-color: #27272a;
+}
+
+.theme-dark .ring-zinc-950 {
+  --tw-ring-color: #f4f4f5;
+}
+
+.theme-dark .tournament-card-next {
+  border-color: #fbbd08;
+  background-color: #18181b;
+  color: #f4f4f5;
+}
+
+.theme-dark .tournament-card-next .tournament-card-date {
+  color: #d4d4d8;
+}
+
+.theme-dark .tournament-card-next .tournament-card-days {
+  background-color: #fbbd08;
+  color: #111111;
 }
 
 input[type="number"] {
