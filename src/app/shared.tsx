@@ -1,4 +1,4 @@
-import { CoachData, Discipline, DISCIPLINES, LogMode, LOG_MODES, OfficialTournament, PracticeLog, Tournament } from "@/lib/types";
+import { CoachData, Discipline, DISCIPLINES, LogMode, LOG_MODES, MatchResult, OfficialTournament, PracticeLog, Tournament } from "@/lib/types";
 
 export type ImportPreviewLog = {
   date: string;
@@ -12,6 +12,36 @@ export type ImportPreviewLog = {
 export type ImportParseResult = {
   logs: ImportPreviewLog[];
   errors: string[];
+};
+
+export type ParsedMatchResult = {
+  winner: string;
+  loser: string;
+  discipline: Discipline;
+  winnerScore: number;
+  winnerTime: number;
+  loserScore: number;
+  loserTime: number;
+  sourceText: string;
+};
+
+export type MatchImportPreviewLog = {
+  date: string;
+  discipline: Discipline;
+  mode: Extract<LogMode, "rated" | "official">;
+  score: number;
+  time: number;
+  opponentName: string;
+  result: MatchResult;
+  officialTournamentId?: string;
+  officialRound?: string;
+  memo?: string;
+};
+
+export type MatchParseResult = {
+  matches: ParsedMatchResult[];
+  errors: string[];
+  warnings: string[];
 };
 
 export function getModeLabel(mode?: LogMode) {
@@ -43,6 +73,7 @@ export function normalizeMemoryLeagueLog(input: {
   officialTournamentId?: string;
   officialRound?: string;
   opponentName?: string;
+  result?: MatchResult;
   score?: number;
   time?: number;
   memo?: string;
@@ -58,7 +89,8 @@ export function normalizeMemoryLeagueLog(input: {
     mode,
     officialTournamentId: mode === "official" ? input.officialTournamentId || undefined : undefined,
     officialRound: mode === "official" ? input.officialRound?.trim() || undefined : undefined,
-    opponentName: mode === "official" ? input.opponentName?.trim() || undefined : undefined,
+    opponentName: input.opponentName?.trim() || undefined,
+    result: input.result,
     score,
     time,
     attempts: 1,
@@ -81,7 +113,8 @@ export function normalizeStoredLog(log: PracticeLog): PracticeLog {
     mode,
     officialTournamentId: mode === "official" ? log.officialTournamentId : undefined,
     officialRound: mode === "official" ? log.officialRound : undefined,
-    opponentName: mode === "official" ? log.opponentName : undefined,
+    opponentName: log.opponentName,
+    result: log.result === "win" || log.result === "loss" ? log.result : undefined,
     score,
     time,
     attempts: toFiniteNumber(log.attempts, 1),
@@ -209,12 +242,105 @@ export function parseMemoryLeagueImportText(input: {
   return { logs, errors };
 }
 
+export function parseMatchResultText(text: string): MatchParseResult {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const matches: ParsedMatchResult[] = [];
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+
+  for (let index = 0; index < lines.length; index += 2) {
+    const headline = lines[index];
+    const scoreLine = lines[index + 1];
+    if (!scoreLine) {
+      errors.push(`読み取れなかった行: ${headline}`);
+      continue;
+    }
+
+    const headlineMatch = headline.match(/^(.+?)\s+beat\s+(.+?)\s+in\s+(.+)$/i);
+    if (!headlineMatch) {
+      errors.push(`読み取れなかった行: ${headline}`);
+      continue;
+    }
+
+    const discipline = normalizeMatchDiscipline(headlineMatch[3]);
+    if (!discipline) {
+      warnings.push(`未対応の種目: ${headlineMatch[3]}`);
+      continue;
+    }
+
+    const scoreMatch = scoreLine.match(/^\(\s*([+-]?\d+(?:\.\d+)?)\s+in\s+([+-]?\d+(?:\.\d+)?)\s*s?\s*\/\s*([+-]?\d+(?:\.\d+)?)\s+in\s+([+-]?\d+(?:\.\d+)?)\s*s?\s*\)/i);
+    if (!scoreMatch) {
+      errors.push(`score/timeを読み取れません: ${scoreLine}`);
+      continue;
+    }
+
+    const winnerScore = Number(scoreMatch[1]);
+    const winnerTime = Number(scoreMatch[2]);
+    const loserScore = Number(scoreMatch[3]);
+    const loserTime = Number(scoreMatch[4]);
+    if (![winnerScore, winnerTime, loserScore, loserTime].every(Number.isFinite)) {
+      errors.push(`score/timeを数値として読めません: ${scoreLine}`);
+      continue;
+    }
+
+    matches.push({
+      winner: headlineMatch[1].trim(),
+      loser: headlineMatch[2].trim(),
+      discipline,
+      winnerScore,
+      winnerTime,
+      loserScore,
+      loserTime,
+      sourceText: `${headline}\n${scoreLine}`,
+    });
+  }
+
+  if (matches.length === 0 && errors.length === 0 && warnings.length === 0) warnings.push("取り込み件数 0件");
+  return { matches, errors, warnings };
+}
+
+export function extractPlayerLogFromMatch(match: ParsedMatchResult, playerName: string): Omit<MatchImportPreviewLog, "date" | "mode" | "officialTournamentId" | "officialRound" | "memo"> | undefined {
+  const target = normalizePlayerName(playerName);
+  if (!target) return undefined;
+  if (normalizePlayerName(match.winner) === target) {
+    return { discipline: match.discipline, score: match.winnerScore, time: match.winnerTime, opponentName: match.loser, result: "win" };
+  }
+  if (normalizePlayerName(match.loser) === target) {
+    return { discipline: match.discipline, score: match.loserScore, time: match.loserTime, opponentName: match.winner, result: "loss" };
+  }
+  return undefined;
+}
+
+export function normalizeMatchImportLog(input: MatchImportPreviewLog): Omit<PracticeLog, "id"> {
+  return normalizeMemoryLeagueLog({
+    date: input.date,
+    discipline: input.discipline,
+    mode: input.mode,
+    score: input.score,
+    time: input.time,
+    officialTournamentId: input.officialTournamentId,
+    officialRound: input.officialRound,
+    opponentName: input.opponentName,
+    result: input.result,
+    memo: input.memo ?? "対戦結果インポート",
+  });
+}
+
 function isLogMode(value: unknown): value is LogMode {
   return LOG_MODES.includes(value as LogMode);
 }
 
 function isDiscipline(value: unknown): value is Discipline {
   return DISCIPLINES.includes(value as Discipline);
+}
+
+function normalizeMatchDiscipline(value: string): Discipline | undefined {
+  const normalized = value.trim().toLowerCase();
+  return DISCIPLINES.find((discipline) => discipline.toLowerCase() === normalized);
+}
+
+function normalizePlayerName(value: string) {
+  return value.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 function toFiniteNumber(value: unknown, fallback: number) {

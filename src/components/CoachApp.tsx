@@ -34,6 +34,9 @@ import {
   saveOfficialTournaments,
   saveTournaments,
   getNextTournament,
+  extractPlayerLogFromMatch,
+  normalizeMatchImportLog,
+  parseMatchResultText,
   updateOfficialTournament,
   updatePracticeLogInline,
 } from "@/app/shared";
@@ -64,11 +67,18 @@ type OpponentFormState = {
 
 const storageKey = "memory-league-coach:data:v1";
 const uiStorageKey = "memory-league-coach:ui:v1";
-const todayIso = () => new Date().toISOString().slice(0, 10);
+const todayIso = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
 
 const navItems: { href: string; labelKey: TranslationKey; view: View }[] = [
   { href: "/dashboard", labelKey: "dashboard", view: "dashboard" },
   { href: "/practice", labelKey: "practiceInput", view: "practice" },
+  { href: "/import", labelKey: "import", view: "import" },
   { href: "/analytics", labelKey: "analytics", view: "analytics" },
   { href: "/opponents", labelKey: "opponents", view: "opponents" },
   { href: "/match-plan", labelKey: "matchPlan", view: "match-plan" },
@@ -80,6 +90,7 @@ const translations = {
   ja: {
     dashboard: "ダッシュボード",
     practiceInput: "ログ入力",
+    import: "インポート",
     analytics: "分析",
     opponents: "対戦相手",
     matchPlan: "対戦プラン",
@@ -170,6 +181,7 @@ const translations = {
   en: {
     dashboard: "Dashboard",
     practiceInput: "Log Input",
+    import: "Import",
     analytics: "Analytics",
     opponents: "Opponents",
     matchPlan: "Match Plan",
@@ -397,7 +409,7 @@ export function CoachApp({ view }: { view: View }) {
   const content = {
     dashboard: <Dashboard data={normalizedData} stats={stats} trend={trend} opponent={nextOpponent} mounted={mounted} onAdd={(log) => addLogs([log])} />,
     practice: <Practice logs={logs} officialTournaments={normalizedData.officialTournaments} onAdd={(log) => addLogs([log])} onUpdate={updateLog} onDelete={removeLog} />,
-    import: <ImportPage onImport={addLogs} />,
+    import: <ImportPage officialTournaments={normalizedData.officialTournaments} onImport={addLogs} />,
     analytics: <Analytics logs={logs} officialTournaments={normalizedData.officialTournaments} />,
     opponents: <Opponents opponents={data.opponents} onAdd={addOpponent} />,
     "match-plan": <MatchPlan data={normalizedData} setData={setData} />,
@@ -585,18 +597,55 @@ function DailyLogForm({ officialTournaments, onAdd }: { officialTournaments: Off
   );
 }
 
-function ImportPage({ onImport }: { onImport: (logs: Omit<PracticeLog, "id">[]) => void }) {
+function ImportPage({ officialTournaments, onImport }: { officialTournaments: OfficialTournament[]; onImport: (logs: Omit<PracticeLog, "id">[]) => void }) {
+  const t = useT();
   const [mode, setMode] = useState<LogMode>("rated");
   const [discipline, setDiscipline] = useState<Discipline>("Cards");
   const [date, setDate] = useState(todayIso());
   const [text, setText] = useState("Time: 48.07s\nScore: 52\n\nTime: 51.20s\nScore: 50");
   const [imported, setImported] = useState(0);
+  const [matchPlayerName, setMatchPlayerName] = useState("Yas");
+  const [matchMode, setMatchMode] = useState<Extract<LogMode, "rated" | "official">>("rated");
+  const [matchDate, setMatchDate] = useState(todayIso());
+  const [matchOfficialTournamentId, setMatchOfficialTournamentId] = useState("");
+  const [matchOfficialRound, setMatchOfficialRound] = useState("");
+  const [matchText, setMatchText] = useState("Yas beat Katie Kermode in Numbers\n(80 in 48.24s / 74 in 44.82s) 4 hours ago\n\nKatie Kermode beat Yas in Cards\n(52 in 60.00s / 34 in 27.94s) 4 hours ago");
+  const [matchImported, setMatchImported] = useState(0);
   const result = useMemo(() => parseMemoryLeagueImportText({ text, mode, discipline, date }), [date, discipline, mode, text]);
+  const matchParseResult = useMemo(() => parseMatchResultText(matchText), [matchText]);
+  const matchPreview = useMemo(() => {
+    const warnings = [...matchParseResult.warnings];
+    const logs = matchParseResult.matches.flatMap((match) => {
+      const extracted = extractPlayerLogFromMatch(match, matchPlayerName);
+      if (!extracted) {
+        warnings.push(`対象選手が見つかりません: ${match.winner} vs ${match.loser} (${match.discipline})`);
+        return [];
+      }
+      return [{
+        ...extracted,
+        date: matchDate,
+        mode: matchMode,
+        officialTournamentId: matchMode === "official" ? matchOfficialTournamentId || undefined : undefined,
+        officialRound: matchMode === "official" ? matchOfficialRound || undefined : undefined,
+        memo: "対戦結果インポート",
+      }];
+    });
+    if (!matchPlayerName.trim()) warnings.push("対象選手名を入力してください。");
+    if (!matchDate) warnings.push("日付を入力してください。");
+    if (logs.length === 0) warnings.push("取り込み件数 0件");
+    return { logs, warnings };
+  }, [matchDate, matchMode, matchOfficialRound, matchOfficialTournamentId, matchParseResult.matches, matchParseResult.warnings, matchPlayerName]);
   const importLogs = () => {
     if (result.logs.length === 0 || result.errors.length > 0) return;
     onImport(result.logs.map((log) => normalizeMemoryLeagueLog({ ...log, memo: "Memory League貼り付けから取り込み" })));
     setImported(result.logs.length);
     setText("");
+  };
+  const importMatchLogs = () => {
+    if (matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate) return;
+    onImport(matchPreview.logs.map(normalizeMatchImportLog));
+    setMatchImported(matchPreview.logs.length);
+    setMatchText("");
   };
 
   return (
@@ -614,6 +663,47 @@ function ImportPage({ onImport }: { onImport: (logs: Omit<PracticeLog, "id">[]) 
         {result.logs.length === 0 ? <p className="text-sm text-zinc-600">まだ記録を読み取れていません。</p> : <LogList logs={result.logs.map((log, index) => ({ ...normalizeMemoryLeagueLog(log), id: `preview-${index}` }))} />}
         <button onClick={importLogs} disabled={result.logs.length === 0 || result.errors.length > 0} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">取り込む</button>
         {imported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700">{imported}件を取り込みました。</p>}
+      </Panel>
+      <Panel title="対戦結果貼り付けインポート">
+        <div className="grid gap-4 md:grid-cols-4">
+          <Field label="対象選手名"><input className="input" value={matchPlayerName} onChange={(event) => { setMatchImported(0); setMatchPlayerName(event.target.value); }} placeholder="Yas" /></Field>
+          <Field label="Mode"><select className="input" value={matchMode} onChange={(event) => setMatchMode(event.target.value as Extract<LogMode, "rated" | "official">)}><option value="rated">Rated</option><option value="official">Official</option></select></Field>
+          <Field label="日付"><input className="input" type="date" value={matchDate} onChange={(event) => setMatchDate(event.target.value)} /></Field>
+          {matchMode === "official" && <Field label={t("officialRound")}><select className="input" value={matchOfficialRound} onChange={(event) => setMatchOfficialRound(event.target.value)}><option value="">-</option>{OFFICIAL_ROUNDS.map((round) => <option key={round} value={round}>{round}</option>)}</select></Field>}
+        </div>
+        {matchMode === "official" && (
+          <div className="mt-4 max-w-md">
+            <Field label={t("officialTournament")}>
+              <select className="input" value={matchOfficialTournamentId} onChange={(event) => setMatchOfficialTournamentId(event.target.value)}>
+                <option value="">{t("officialTournamentUnset")}</option>
+                {officialTournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
+              </select>
+            </Field>
+          </div>
+        )}
+        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-44 font-mono text-sm" value={matchText} onChange={(event) => { setMatchImported(0); setMatchText(event.target.value); }} /></Field>
+      </Panel>
+      {(matchParseResult.errors.length > 0 || matchPreview.warnings.length > 0) && (
+        <Panel title="読み取り結果">
+          <div className="grid gap-2 text-sm">
+            {matchParseResult.errors.map((error) => <div key={error} className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{error}</div>)}
+            {matchPreview.warnings.map((warning) => <div key={warning} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">{warning}</div>)}
+          </div>
+        </Panel>
+      )}
+      <Panel title="対戦結果プレビュー">
+        {matchPreview.logs.length === 0 ? <p className="text-sm text-zinc-600">取り込み候補がありません。</p> : (
+          <div className="grid gap-2">
+            {matchPreview.logs.map((log, index) => (
+              <div key={`${log.discipline}-${index}`} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm">
+                {formatDisplayDate(log.date)} {log.discipline} {getModeLabel(log.mode)} vs {log.opponentName} {log.result === "win" ? "勝ち" : "負け"} Score {log.score} Time {record(log.time)}s
+                {log.mode === "official" && ` / ${getOfficialTournamentName(officialTournaments, log.officialTournamentId)}${log.officialRound ? ` / ${log.officialRound}` : ""}`}
+              </div>
+            ))}
+          </div>
+        )}
+        <button onClick={importMatchLogs} disabled={matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">取り込む</button>
+        {matchImported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700">{matchImported}件を取り込みました。</p>}
       </Panel>
     </Page>
   );
@@ -953,7 +1043,7 @@ function LogTable({
                         </>
                       )}
                     </div>
-                  ) : <ModeBadge mode={log.mode} officialTournamentName={log.mode === "official" ? getOfficialTournamentName(officialTournaments, log.officialTournamentId) : undefined} officialRound={log.officialRound} opponentName={log.opponentName} />}
+                  ) : <ModeBadge mode={log.mode} officialTournamentName={log.mode === "official" ? getOfficialTournamentName(officialTournaments, log.officialTournamentId) : undefined} officialRound={log.officialRound} opponentName={log.opponentName} result={log.result} />}
                 </td>
                 <td className={`${cellClass} font-semibold`}>
                   {isEditing ? <input className={editInputClass} type="number" min="0" step="1" value={draft.score} onChange={(event) => onDraftChange({ ...draft, score: event.target.value === "" ? "" : Number(event.target.value) })} aria-label="Score" /> : log.score ?? 0}
@@ -1018,8 +1108,9 @@ function formatMonth(month: string) {
   return `${year}年${Number(rawMonth)}月`;
 }
 
-function ModeBadge({ mode, officialTournamentName, officialRound, opponentName }: { mode?: LogMode; officialTournamentName?: string; officialRound?: string; opponentName?: string }) {
-  const details = mode === "official" ? [officialTournamentName, officialRound, opponentName ? `vs ${opponentName}` : undefined].filter(Boolean) : [];
+function ModeBadge({ mode, officialTournamentName, officialRound, opponentName, result }: { mode?: LogMode; officialTournamentName?: string; officialRound?: string; opponentName?: string; result?: "win" | "loss" }) {
+  const matchDetails = [result ? (result === "win" ? "勝ち" : "負け") : undefined, opponentName ? `vs ${opponentName}` : undefined];
+  const details = mode === "official" ? [officialTournamentName, officialRound, ...matchDetails].filter(Boolean) : matchDetails.filter(Boolean);
   return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{[getModeLabel(mode), ...details].join(" / ")}</span>;
 }
 

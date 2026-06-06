@@ -28,6 +28,8 @@ export const OFFICIAL_ROUNDS = ["GL", "Qualifier", "R16", "QF", "SF", "F"] as co
 
 export type OfficialRound = (typeof OFFICIAL_ROUNDS)[number];
 
+export type MatchResult = "win" | "loss";
+
 export type PracticeLog = {
   id: string;
   date: string;
@@ -36,6 +38,7 @@ export type PracticeLog = {
   officialTournamentId?: string;
   officialRound?: string;
   opponentName?: string;
+  result?: MatchResult;
   score?: number;
   time?: number;
   attempts: number;
