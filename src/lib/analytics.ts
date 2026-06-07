@@ -5,6 +5,8 @@ export const percent = (value: number) => `${Math.round(value)}%`;
 
 export const record = (value: number) => (value > 0 ? value.toFixed(1) : "-");
 
+export const formatTime = (value: number) => (value > 0 ? value.toFixed(2) : "-");
+
 export type PracticeMenuItem = {
   discipline: Discipline;
   count: number;

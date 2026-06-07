@@ -15,6 +15,7 @@ import {
   getRecentTrend,
   getWeeklyReview,
   percent,
+  formatTime,
   record,
 } from "@/lib/analytics";
 import { sampleData } from "@/lib/sample-data";
@@ -599,17 +600,19 @@ function DailyLogForm({ officialTournaments, onAdd }: { officialTournaments: Off
 
 function ImportPage({ officialTournaments, onImport }: { officialTournaments: OfficialTournament[]; onImport: (logs: Omit<PracticeLog, "id">[]) => void }) {
   const t = useT();
-  const [mode, setMode] = useState<LogMode>("rated");
+  const [mode, setMode] = useState<LogMode>("train");
   const [discipline, setDiscipline] = useState<Discipline>("Cards");
   const [date, setDate] = useState(todayIso());
-  const [text, setText] = useState("Time: 48.07s\nScore: 52\n\nTime: 51.20s\nScore: 50");
+  const [text, setText] = useState("");
+  const [importMemo, setImportMemo] = useState("");
   const [imported, setImported] = useState(0);
   const [matchPlayerName, setMatchPlayerName] = useState("Yas");
   const [matchMode, setMatchMode] = useState<Extract<LogMode, "rated" | "official">>("rated");
   const [matchDate, setMatchDate] = useState(todayIso());
   const [matchOfficialTournamentId, setMatchOfficialTournamentId] = useState("");
   const [matchOfficialRound, setMatchOfficialRound] = useState("");
-  const [matchText, setMatchText] = useState("Yas beat Katie Kermode in Numbers\n(80 in 48.24s / 74 in 44.82s) 4 hours ago\n\nKatie Kermode beat Yas in Cards\n(52 in 60.00s / 34 in 27.94s) 4 hours ago");
+  const [matchText, setMatchText] = useState("");
+  const [matchMemo, setMatchMemo] = useState("");
   const [matchImported, setMatchImported] = useState(0);
   const result = useMemo(() => parseMemoryLeagueImportText({ text, mode, discipline, date }), [date, discipline, mode, text]);
   const matchParseResult = useMemo(() => parseMatchResultText(matchText), [matchText]);
@@ -627,42 +630,60 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
         mode: matchMode,
         officialTournamentId: matchMode === "official" ? matchOfficialTournamentId || undefined : undefined,
         officialRound: matchMode === "official" ? matchOfficialRound || undefined : undefined,
-        memo: "対戦結果インポート",
+        memo: matchMemo,
       }];
     });
     if (!matchPlayerName.trim()) warnings.push("対象選手名を入力してください。");
     if (!matchDate) warnings.push("日付を入力してください。");
     if (logs.length === 0) warnings.push("取り込み件数 0件");
     return { logs, warnings };
-  }, [matchDate, matchMode, matchOfficialRound, matchOfficialTournamentId, matchParseResult.matches, matchParseResult.warnings, matchPlayerName]);
+  }, [matchDate, matchMemo, matchMode, matchOfficialRound, matchOfficialTournamentId, matchParseResult.matches, matchParseResult.warnings, matchPlayerName]);
   const importLogs = () => {
     if (result.logs.length === 0 || result.errors.length > 0) return;
-    onImport(result.logs.map((log) => normalizeMemoryLeagueLog({ ...log, memo: "Memory League貼り付けから取り込み" })));
+    onImport(result.logs.map((log) => normalizeMemoryLeagueLog({ ...log, memo: importMemo })));
     setImported(result.logs.length);
     setText("");
+    setImportMemo("");
   };
   const importMatchLogs = () => {
     if (matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate) return;
     onImport(matchPreview.logs.map(normalizeMatchImportLog));
     setMatchImported(matchPreview.logs.length);
     setMatchText("");
+    setMatchMemo("");
   };
 
   return (
     <Page title="インポート" subtitle="Memory Leagueの結果画面からコピーしたテキストを貼り付けて取り込みます。MVPでは手入力がメイン導線です。">
-      <Panel title="インポート設定">
-        <div className="grid gap-4 md:grid-cols-3">
+      <Panel title={t("import")}>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_180px]">
           <Field label="モード"><select className="input" value={mode} onChange={(event) => setMode(event.target.value as LogMode)}>{LOG_MODES.map((item) => <option key={item} value={item}>{getModeLabel(item)}</option>)}</select></Field>
-          <Field label="種目"><select className="input" value={discipline} onChange={(event) => setDiscipline(event.target.value as Discipline)}>{DISCIPLINES.map((item) => <option key={item}>{item}</option>)}</select><span className="mt-1"><DisciplineBadge discipline={discipline} /></span></Field>
           <Field label="日付"><input className="input" type="date" value={date} onChange={(event) => setDate(event.target.value)} /></Field>
         </div>
+        <div className="mt-4">
+          <div className="mb-2 text-sm font-medium text-zinc-700 dark:text-zinc-200">種目</div>
+          <div className="flex flex-wrap gap-2">
+            {DISCIPLINES.map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => setDiscipline(item)}
+                className={`min-h-11 rounded-md border px-3 py-2 text-sm font-bold transition ${discipline === item ? "ring-2 ring-zinc-950 ring-offset-2 dark:ring-zinc-100 dark:ring-offset-zinc-950" : "hover:opacity-85"}`}
+                style={getDisciplineBadgeStyle(item)}
+              >
+                {item}
+              </button>
+            ))}
+          </div>
+        </div>
         <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-56 font-mono text-sm" value={text} onChange={(event) => { setImported(0); setText(event.target.value); }} placeholder={mode === "train" ? "Score: 0\nTime: 0.69 sec" : "Time: 48.07s\nScore: 52"} /></Field>
+        <Field label={t("memo")}><textarea className="input mt-4 min-h-24 resize-y" value={importMemo} onChange={(event) => { setImported(0); setImportMemo(event.target.value); }} placeholder="メモ" /></Field>
       </Panel>
       {result.errors.length > 0 && <Panel title="エラー"><ul className="grid gap-2 text-sm text-rose-700">{result.errors.map((error) => <li key={error} className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2">{error}</li>)}</ul></Panel>}
       <Panel title="プレビュー">
         {result.logs.length === 0 ? <p className="text-sm text-zinc-600">まだ記録を読み取れていません。</p> : <LogList logs={result.logs.map((log, index) => ({ ...normalizeMemoryLeagueLog(log), id: `preview-${index}` }))} />}
-        <button onClick={importLogs} disabled={result.logs.length === 0 || result.errors.length > 0} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">取り込む</button>
-        {imported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700">{imported}件を取り込みました。</p>}
+        <button onClick={importLogs} disabled={result.logs.length === 0 || result.errors.length > 0} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-zinc-100 dark:text-zinc-950 dark:disabled:bg-zinc-700">{t("import")}</button>
+        {imported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">インポート完了：{imported}件のログを追加しました</p>}
       </Panel>
       <Panel title="対戦結果貼り付けインポート">
         <div className="grid gap-4 md:grid-cols-4">
@@ -681,7 +702,8 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
             </Field>
           </div>
         )}
-        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-44 font-mono text-sm" value={matchText} onChange={(event) => { setMatchImported(0); setMatchText(event.target.value); }} /></Field>
+        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-44 font-mono text-sm" value={matchText} onChange={(event) => { setMatchImported(0); setMatchText(event.target.value); }} placeholder={"Yas beat Katie Kermode in Numbers\n(80 in 48.24s / 74 in 44.82s) 4 hours ago\n\nKatie Kermode beat Yas in Cards\n(52 in 60.00s / 34 in 27.94s) 4 hours ago"} /></Field>
+        <Field label={t("memo")}><textarea className="input mt-4 min-h-24 resize-y" value={matchMemo} onChange={(event) => { setMatchImported(0); setMatchMemo(event.target.value); }} placeholder="メモ" /></Field>
       </Panel>
       {(matchParseResult.errors.length > 0 || matchPreview.warnings.length > 0) && (
         <Panel title="読み取り結果">
@@ -696,14 +718,14 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
           <div className="grid gap-2">
             {matchPreview.logs.map((log, index) => (
               <div key={`${log.discipline}-${index}`} className="rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm">
-                {formatDisplayDate(log.date)} {log.discipline} {getModeLabel(log.mode)} vs {log.opponentName} {log.result === "win" ? "勝ち" : "負け"} Score {log.score} Time {record(log.time)}s
+                {formatDisplayDate(log.date)} {log.discipline} {getModeLabel(log.mode)} vs {log.opponentName} {log.result === "win" ? "勝ち" : "負け"} Score {log.score} Time {formatTime(log.time)}s
                 {log.mode === "official" && ` / ${getOfficialTournamentName(officialTournaments, log.officialTournamentId)}${log.officialRound ? ` / ${log.officialRound}` : ""}`}
               </div>
             ))}
           </div>
         )}
-        <button onClick={importMatchLogs} disabled={matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300">取り込む</button>
-        {matchImported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700">{matchImported}件を取り込みました。</p>}
+        <button onClick={importMatchLogs} disabled={matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-zinc-100 dark:text-zinc-950 dark:disabled:bg-zinc-700">{t("import")}</button>
+        {matchImported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">インポート完了：{matchImported}件のログを追加しました</p>}
       </Panel>
     </Page>
   );
@@ -785,7 +807,7 @@ function Opponents({ opponents, onAdd }: { opponents: Opponent[]; onAdd: (oppone
           <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">{t("addOpponent")}</button>
         </form>
       </Panel>
-      <div className="grid gap-4 lg:grid-cols-2">{opponents.map((opponent) => <Panel key={opponent.id} title={opponent.name}><div className="grid gap-2 sm:grid-cols-2">{DISCIPLINES.map((discipline) => <div key={discipline} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm"><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><span className="font-semibold">{record(opponent.averages[discipline])}秒 / {percent(opponent.successRates[discipline])}</span></div>)}</div><p className="mt-4 text-sm text-zinc-600">{opponent.memo}</p></Panel>)}</div>
+      <div className="grid gap-4 lg:grid-cols-2">{opponents.map((opponent) => <Panel key={opponent.id} title={opponent.name}><div className="grid gap-2 sm:grid-cols-2">{DISCIPLINES.map((discipline) => <div key={discipline} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm"><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><span className="font-semibold">{formatTime(opponent.averages[discipline])}秒 / {percent(opponent.successRates[discipline])}</span></div>)}</div><p className="mt-4 text-sm text-zinc-600">{opponent.memo}</p></Panel>)}</div>
     </Page>
   );
 }
@@ -803,7 +825,7 @@ function MatchPlan({ data, setData }: { data: CoachData; setData: React.Dispatch
       <Panel title={t("opponents")}><select className="input max-w-md" value={opponent?.id ?? ""} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}>{data.opponents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Panel>
       <div className="grid gap-4 md:grid-cols-4"><Metric label={t("targetDisciplines")} value={plan.targets.join(" / ") || "-"} detail={t("matchPlan")} /><Metric label={t("warningDisciplines")} value={plan.warnings.join(" / ") || "-"} detail={t("successRate")} /><Metric label={t("lowerPriority")} value={plan.discardable.join(" / ") || "-"} detail={t("discipline")} /><Metric label={t("preMatchMenu")} value={plan.menu.join(" / ")} detail={t("practiceInput")} /></div>
       <Panel title={t("practicePolicy")}><p className="text-lg font-semibold">{plan.winLine}</p></Panel>
-      <Panel title={t("disciplineComparison")}><div className="grid gap-3">{plan.comparison.map((item) => <div key={item.discipline} className="rounded-lg border bg-white p-4" style={getDisciplineCardStyle(item.discipline)}><div className="flex flex-wrap items-center justify-between gap-2"><DisciplineBadge discipline={item.discipline} /><div className={item.edge >= 0 ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>Edge {item.edge.toFixed(1)}</div></div><div className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div>{t("averageTime")} {record(item.averageTime)}秒 / {t("successRate")} {percent(item.successRate)}</div><div>{t("opponents")} {record(item.opponentAverage)}秒 / {t("successRate")} {percent(item.opponentSuccessRate)}</div></div></div>)}</div></Panel>
+      <Panel title={t("disciplineComparison")}><div className="grid gap-3">{plan.comparison.map((item) => <div key={item.discipline} className="rounded-lg border bg-white p-4" style={getDisciplineCardStyle(item.discipline)}><div className="flex flex-wrap items-center justify-between gap-2"><DisciplineBadge discipline={item.discipline} /><div className={item.edge >= 0 ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>Edge {item.edge.toFixed(1)}</div></div><div className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div>{t("averageTime")} {formatTime(item.averageTime)}秒 / {t("successRate")} {percent(item.successRate)}</div><div>{t("opponents")} {formatTime(item.opponentAverage)}秒 / {t("successRate")} {percent(item.opponentSuccessRate)}</div></div></div>)}</div></Panel>
     </Page>
   );
 }
@@ -1049,7 +1071,7 @@ function LogTable({
                   {isEditing ? <input className={editInputClass} type="number" min="0" step="1" value={draft.score} onChange={(event) => onDraftChange({ ...draft, score: event.target.value === "" ? "" : Number(event.target.value) })} aria-label="Score" /> : log.score ?? 0}
                 </td>
                 <td className={`${cellClass} font-semibold`}>
-                  {isEditing ? <input className={editInputClass} type="number" min="0" step="0.01" value={draft.time} onChange={(event) => onDraftChange({ ...draft, time: event.target.value === "" ? "" : Number(event.target.value) })} aria-label="Time" /> : `${record(log.time ?? 0)}s`}
+                  {isEditing ? <input className={editInputClass} type="number" min="0" step="0.01" value={draft.time} onChange={(event) => onDraftChange({ ...draft, time: event.target.value === "" ? "" : Number(event.target.value) })} aria-label="Time" /> : `${formatTime(log.time ?? 0)}s`}
                 </td>
                 <td className={`${cellClass} font-semibold`}>{isSuccessfulLog(isEditing ? { ...log, score: draft.score === "" ? 0 : draft.score } : log) ? "○" : "×"}</td>
                 <td className="px-3 py-3 align-middle text-sm">
@@ -1083,12 +1105,12 @@ function formatDisplayDate(date: string) {
 
 function EventStatsGrid({ stats }: { stats: ReturnType<typeof getDisciplineStats> }) {
   const t = useT();
-  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{stats.map((item) => <div key={item.discipline} className="rounded-lg border bg-zinc-50 p-4" style={getDisciplineCardStyle(item.discipline)}><DisciplineBadge discipline={item.discipline} /><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><MiniMetric label={t("attempts")} value={`${item.attempts}回`} /><MiniMetric label={t("averageScore")} value={record(item.averageScore)} /><MiniMetric label={t("averageTime")} value={`${record(item.averageTime)}秒`} /><MiniMetric label={t("successRate")} value={percent(item.successRate)} /><MiniMetric label={t("bestScore")} value={record(item.bestScore)} /><MiniMetric label={t("bestTime")} value={`${record(item.bestTime)}秒`} /></div></div>)}</div>;
+  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{stats.map((item) => <div key={item.discipline} className="rounded-lg border bg-zinc-50 p-4" style={getDisciplineCardStyle(item.discipline)}><DisciplineBadge discipline={item.discipline} /><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><MiniMetric label={t("attempts")} value={`${item.attempts}回`} /><MiniMetric label={t("averageScore")} value={record(item.averageScore)} /><MiniMetric label={t("averageTime")} value={`${formatTime(item.averageTime)}秒`} /><MiniMetric label={t("successRate")} value={percent(item.successRate)} /><MiniMetric label={t("bestScore")} value={record(item.bestScore)} /><MiniMetric label={t("bestTime")} value={`${formatTime(item.bestTime)}秒`} /></div></div>)}</div>;
 }
 
 function DisciplineWindowGrid({ data }: { data: ReturnType<typeof getDisciplineWindowStats> }) {
   const t = useT();
-  return <div className="grid gap-4">{data.map((item) => <section key={item.discipline} className="rounded-lg border bg-zinc-50 p-4" style={getDisciplineCardStyle(item.discipline)}><DisciplineBadge discipline={item.discipline} /><div className="mt-4 grid gap-3 xl:grid-cols-4">{item.windows.map((window) => <div key={window.size} className="rounded-lg border border-zinc-200 bg-white p-4"><div className="flex items-center justify-between gap-2"><div className="font-bold">直近{window.size}回</div>{!window.isEnoughData && <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">{t("insufficientData")}</span>}</div><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><MiniMetric label={t("averageScore")} value={window.isEnoughData ? record(window.averageScore) : "-"} /><MiniMetric label={t("averageTime")} value={window.isEnoughData ? `${record(window.averageTime)}秒` : "-"} /><MiniMetric label={t("successRate")} value={window.isEnoughData ? percent(window.successRate) : "-"} /><MiniMetric label={t("stability")} value={window.isEnoughData ? percent(window.stability) : "-"} /><MiniMetric label={t("bestScore")} value={window.isEnoughData ? record(window.bestScore) : "-"} /><MiniMetric label={t("bestTime")} value={window.isEnoughData ? `${record(window.bestTime)}秒` : "-"} /></div></div>)}</div></section>)}</div>;
+  return <div className="grid gap-4">{data.map((item) => <section key={item.discipline} className="rounded-lg border bg-zinc-50 p-4" style={getDisciplineCardStyle(item.discipline)}><DisciplineBadge discipline={item.discipline} /><div className="mt-4 grid gap-3 xl:grid-cols-4">{item.windows.map((window) => <div key={window.size} className="rounded-lg border border-zinc-200 bg-white p-4"><div className="flex items-center justify-between gap-2"><div className="font-bold">直近{window.size}回</div>{!window.isEnoughData && <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">{t("insufficientData")}</span>}</div><div className="mt-3 grid grid-cols-2 gap-2 text-sm"><MiniMetric label={t("averageScore")} value={window.isEnoughData ? record(window.averageScore) : "-"} /><MiniMetric label={t("averageTime")} value={window.isEnoughData ? `${formatTime(window.averageTime)}秒` : "-"} /><MiniMetric label={t("successRate")} value={window.isEnoughData ? percent(window.successRate) : "-"} /><MiniMetric label={t("stability")} value={window.isEnoughData ? percent(window.stability) : "-"} /><MiniMetric label={t("bestScore")} value={window.isEnoughData ? record(window.bestScore) : "-"} /><MiniMetric label={t("bestTime")} value={window.isEnoughData ? `${formatTime(window.bestTime)}秒` : "-"} /></div></div>)}</div></section>)}</div>;
 }
 
 function FilterButtons({ label, items, value, onChange }: { label: string; items: { value: string; label: string }[]; value: string; onChange: (value: string) => void }) {
@@ -1152,7 +1174,7 @@ function Metric({ label, value, detail }: { label: string; value: string; detail
 
 function StatsGrid({ stats }: { stats: ReturnType<typeof getDisciplineStats> }) {
   const t = useT();
-  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{stats.map((item) => <div key={item.discipline} className="rounded-lg border bg-zinc-50 p-4" style={getDisciplineCardStyle(item.discipline)}><div className="flex items-center justify-between gap-3"><DisciplineBadge discipline={item.discipline} /><span className="text-sm font-semibold">{item.attempts}回</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><MiniMetric label={t("successRate")} value={percent(item.successRate)} /><MiniMetric label={t("averageTime")} value={`${record(item.averageTime)}秒`} /><MiniMetric label={t("averageScore")} value={record(item.averageScore)} /><MiniMetric label={t("stability")} value={percent(item.stability)} /></div></div>)}</div>;
+  return <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{stats.map((item) => <div key={item.discipline} className="rounded-lg border bg-zinc-50 p-4" style={getDisciplineCardStyle(item.discipline)}><div className="flex items-center justify-between gap-3"><DisciplineBadge discipline={item.discipline} /><span className="text-sm font-semibold">{item.attempts}回</span></div><div className="mt-4 grid grid-cols-2 gap-3 text-sm"><MiniMetric label={t("successRate")} value={percent(item.successRate)} /><MiniMetric label={t("averageTime")} value={`${formatTime(item.averageTime)}秒`} /><MiniMetric label={t("averageScore")} value={record(item.averageScore)} /><MiniMetric label={t("stability")} value={percent(item.stability)} /></div></div>)}</div>;
 }
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
