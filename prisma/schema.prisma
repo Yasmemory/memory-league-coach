@@ -1,0 +1,90 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Discipline {
+  Cards
+  Images
+  InternationalNames @map("International Names")
+  Names
+  Numbers
+  Words
+}
+
+enum LogMode {
+  train
+  rated
+  official
+}
+
+enum MatchResult {
+  win
+  loss
+}
+
+enum LogSource {
+  manual
+  imported @map("import")
+  extension
+}
+
+model PracticeLog {
+  id                   String              @id @default(cuid())
+  date                 DateTime            @db.Date
+  discipline           Discipline
+  mode                 LogMode             @default(train)
+  score                Float?
+  time                 Float?
+  result               MatchResult?
+  opponentName         String?
+  officialTournamentId String?
+  officialRound        String?
+  memo                 String?
+  source               LogSource           @default(manual)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  officialTournament   OfficialTournament? @relation(fields: [officialTournamentId], references: [id], onDelete: SetNull)
+
+  @@index([date])
+  @@index([discipline])
+  @@index([mode])
+  @@index([officialTournamentId])
+}
+
+model Tournament {
+  id        String   @id @default(cuid())
+  name      String
+  date      DateTime @db.Date
+  goal      String?
+  memo      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([date])
+}
+
+model OfficialTournament {
+  id           String        @id @default(cuid())
+  name         String
+  date         DateTime      @db.Date
+  memo         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  practiceLogs PracticeLog[]
+
+  @@index([date])
+}
+
+model Opponent {
+  id           String   @id @default(cuid())
+  name         String
+  averages     Json?
+  successRates Json?
+  memo         String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}

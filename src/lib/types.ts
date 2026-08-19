@@ -30,6 +30,8 @@ export type OfficialRound = (typeof OFFICIAL_ROUNDS)[number];
 
 export type MatchResult = "win" | "loss";
 
+export type LogSource = "manual" | "import" | "extension";
+
 export type PracticeLog = {
   id: string;
   date: string;
@@ -39,6 +41,7 @@ export type PracticeLog = {
   officialRound?: string;
   opponentName?: string;
   result?: MatchResult;
+  source?: LogSource;
   score?: number;
   time?: number;
   attempts: number;

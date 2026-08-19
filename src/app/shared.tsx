@@ -1,4 +1,4 @@
-import { CoachData, Discipline, DISCIPLINES, LogMode, LOG_MODES, MatchResult, OfficialTournament, PracticeLog, Tournament } from "@/lib/types";
+import { Discipline, DISCIPLINES, LogMode, LOG_MODES, MatchResult, OfficialTournament, PracticeLog, Tournament } from "@/lib/types";
 
 export type ImportPreviewLog = {
   date: string;
@@ -134,18 +134,6 @@ export function getNextTournament(tournaments: Tournament[]) {
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0];
 }
 
-export function saveTournaments(data: CoachData, tournaments: Tournament[]): CoachData {
-  return { ...data, tournaments };
-}
-
-export function getOfficialTournaments(data: CoachData) {
-  return data.officialTournaments ?? [];
-}
-
-export function saveOfficialTournaments(data: CoachData, officialTournaments: OfficialTournament[]): CoachData {
-  return { ...data, officialTournaments };
-}
-
 export function getOfficialTournamentName(officialTournaments: OfficialTournament[], officialTournamentId?: string) {
   if (!officialTournamentId) return "大会未設定";
   return officialTournaments.find((tournament) => tournament.id === officialTournamentId)?.name ?? "大会未設定";
@@ -156,18 +144,6 @@ export function filterLogsByOfficialTournament(logs: PracticeLog[], officialTour
   if (officialTournamentId === "all") return normalized;
   if (officialTournamentId === "unset") return normalized.filter((log) => log.mode === "official" && !log.officialTournamentId);
   return normalized.filter((log) => log.mode === "official" && log.officialTournamentId === officialTournamentId);
-}
-
-export function updateOfficialTournament(officialTournaments: OfficialTournament[], updatedTournament: OfficialTournament) {
-  return officialTournaments.map((tournament) => (tournament.id === updatedTournament.id ? updatedTournament : tournament));
-}
-
-export function deleteOfficialTournament(data: CoachData, id: string): CoachData {
-  return {
-    ...data,
-    officialTournaments: getOfficialTournaments(data).filter((tournament) => tournament.id !== id),
-    logs: data.logs.map((log) => (log.officialTournamentId === id ? { ...log, officialTournamentId: undefined } : log)),
-  };
 }
 
 export function updatePracticeLog(logs: PracticeLog[], updatedLog: PracticeLog) {

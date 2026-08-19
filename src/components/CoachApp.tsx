@@ -22,25 +22,32 @@ import { sampleData } from "@/lib/sample-data";
 import { CoachData, Discipline, DISCIPLINE_COLORS, DISCIPLINES, LOG_MODES, LogMode, OFFICIAL_ROUNDS, OfficialTournament, Opponent, PracticeLog, Tournament } from "@/lib/types";
 import {
   deletePracticeLog,
-  deleteOfficialTournament,
   filterLogsByOfficialTournament,
   getModeBadgeStyle,
   getModeLabel,
   getOfficialTournamentName,
-  getOfficialTournaments,
   isSuccessfulLog,
   normalizeMemoryLeagueLog,
   normalizeStoredLog,
   parseMemoryLeagueImportText,
-  saveOfficialTournaments,
-  saveTournaments,
   getNextTournament,
   extractPlayerLogFromMatch,
   normalizeMatchImportLog,
   parseMatchResultText,
-  updateOfficialTournament,
   updatePracticeLogInline,
 } from "@/app/shared";
+import { createPracticeLogInApi, fetchPracticeLogsFromApi, readPracticeLogApiError, type PracticeLogRequest, type PracticeLogResponse as DbPracticeLogResponse } from "@/lib/practice-log-api";
+import { createOpponentInApi, deleteOpponentInApi, fetchOpponentsFromApi, updateOpponentInApi } from "@/lib/opponent-api";
+import {
+  createOfficialTournamentInApi,
+  createTournamentInApi,
+  deleteOfficialTournamentInApi,
+  deleteTournamentInApi,
+  fetchOfficialTournamentsFromApi,
+  fetchTournamentsFromApi,
+  updateOfficialTournamentInApi,
+  updateTournamentInApi,
+} from "@/lib/tournament-api";
 
 type View = "dashboard" | "practice" | "analytics" | "opponents" | "match-plan" | "weekly-review" | "settings" | "import";
 type NumberInputValue = number | "";
@@ -65,7 +72,6 @@ type OpponentFormState = {
   successRates: Record<Discipline, NumberInputValue>;
   memo: string;
 };
-
 const storageKey = "memory-league-coach:data:v1";
 const uiStorageKey = "memory-league-coach:ui:v1";
 const todayIso = () => {
@@ -75,6 +81,263 @@ const todayIso = () => {
   const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
+
+function practiceLogFromDb(log: DbPracticeLogResponse): PracticeLog {
+  return normalizeStoredLog({
+    id: log.id,
+    date: log.date,
+    discipline: log.discipline,
+    mode: log.mode,
+    officialTournamentId: log.officialTournamentId ?? undefined,
+    officialRound: log.officialRound ?? undefined,
+    opponentName: log.opponentName ?? undefined,
+    result: log.result ?? undefined,
+    source: log.source,
+    score: log.score ?? undefined,
+    time: log.time ?? undefined,
+    attempts: 1,
+    successes: Number(log.score ?? 0) >= 1 ? 1 : 0,
+    failures: Number(log.score ?? 0) >= 1 ? 0 : 1,
+    averageRecord: log.time ?? 0,
+    bestRecord: log.time ?? 0,
+    memo: log.memo ?? "",
+  });
+}
+
+function practiceLogToDbPayload(log: Omit<PracticeLog, "id"> | PracticeLog): PracticeLogRequest {
+  return {
+    date: log.date,
+    discipline: log.discipline,
+    mode: log.mode ?? "train",
+    score: log.score ?? null,
+    time: log.time ?? null,
+    result: log.result ?? null,
+    opponentName: log.opponentName ?? null,
+    officialTournamentId: log.officialTournamentId ?? null,
+    officialRound: log.officialRound ?? null,
+    memo: log.memo ?? null,
+    source: log.source ?? "manual",
+  };
+}
+
+async function parseApiError(response: Response, fallback: string) {
+  return readPracticeLogApiError(response, fallback);
+}
+
+function usePracticeLogs() {
+  const [logs, setLogs] = useState<PracticeLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const dbLogs = await fetchPracticeLogsFromApi("DBログの取得に失敗しました。");
+      setLogs(dbLogs.map(practiceLogFromDb));
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "DBログの取得に失敗しました。";
+      setError(message);
+      throw loadError;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refresh().catch(() => {
+        // The hook exposes the error state to the active page.
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const createLog = async (log: Omit<PracticeLog, "id">) => {
+    setError("");
+    try {
+      const saved = practiceLogFromDb(await createPracticeLogInApi(practiceLogToDbPayload(log), "ログの保存に失敗しました。"));
+      setLogs((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+      return saved;
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : "ログの保存に失敗しました。";
+      setError(message);
+      throw saveError;
+    }
+  };
+
+  const updateLog = async (log: PracticeLog) => {
+    setError("");
+    try {
+      const response = await fetch(`/api/practice-logs/${encodeURIComponent(log.id)}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(practiceLogToDbPayload(log)),
+      });
+      if (!response.ok) throw new Error(await parseApiError(response, "ログの更新に失敗しました。"));
+      const saved = practiceLogFromDb((await response.json()) as DbPracticeLogResponse);
+      setLogs((current) => updatePracticeLogInline(current, saved));
+      return saved;
+    } catch (saveError) {
+      const message = saveError instanceof Error ? saveError.message : "ログの更新に失敗しました。";
+      setError(message);
+      throw saveError;
+    }
+  };
+
+  const deleteLog = async (id: string) => {
+    setError("");
+    try {
+      const response = await fetch(`/api/practice-logs/${encodeURIComponent(id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await parseApiError(response, "ログの削除に失敗しました。"));
+      setLogs((current) => deletePracticeLog(current, id));
+    } catch (deleteError) {
+      const message = deleteError instanceof Error ? deleteError.message : "ログの削除に失敗しました。";
+      setError(message);
+      throw deleteError;
+    }
+  };
+
+  return { logs, loading, error, refresh, createLog, updateLog, deleteLog };
+}
+
+function useTournaments() {
+  const [tournaments, setTournaments] = useState<Tournament[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setTournaments(await fetchTournamentsFromApi());
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "大会の取得に失敗しました。";
+      setError(message);
+      throw loadError;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refresh().catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const create = async (tournament: Omit<Tournament, "id">) => {
+    const saved = await createTournamentInApi(tournament);
+    setTournaments((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    return saved;
+  };
+
+  const update = async (id: string, tournament: Omit<Tournament, "id">) => {
+    const saved = await updateTournamentInApi(id, tournament);
+    setTournaments((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+    return saved;
+  };
+
+  const remove = async (id: string) => {
+    await deleteTournamentInApi(id);
+    setTournaments((current) => current.filter((item) => item.id !== id));
+  };
+
+  return { tournaments, loading, error, refresh, create, update, remove };
+}
+
+function useOfficialTournaments() {
+  const [officialTournaments, setOfficialTournaments] = useState<OfficialTournament[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setOfficialTournaments(await fetchOfficialTournamentsFromApi());
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "Official大会の取得に失敗しました。";
+      setError(message);
+      throw loadError;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refresh().catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const create = async (tournament: Omit<OfficialTournament, "id">) => {
+    const saved = await createOfficialTournamentInApi(tournament);
+    setOfficialTournaments((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    return saved;
+  };
+
+  const update = async (id: string, tournament: Omit<OfficialTournament, "id">) => {
+    const saved = await updateOfficialTournamentInApi(id, tournament);
+    setOfficialTournaments((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+    return saved;
+  };
+
+  const remove = async (id: string) => {
+    await deleteOfficialTournamentInApi(id);
+    setOfficialTournaments((current) => current.filter((item) => item.id !== id));
+  };
+
+  return { officialTournaments, loading, error, refresh, create, update, remove };
+}
+
+function useOpponents() {
+  const [opponents, setOpponents] = useState<Opponent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const refresh = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setOpponents(await fetchOpponentsFromApi());
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : "対戦相手の取得に失敗しました。";
+      setError(message);
+      throw loadError;
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refresh().catch(() => {});
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const create = async (opponent: Omit<Opponent, "id">) => {
+    const saved = await createOpponentInApi(opponent);
+    setOpponents((current) => [saved, ...current.filter((item) => item.id !== saved.id)]);
+    return saved;
+  };
+
+  const update = async (id: string, opponent: Omit<Opponent, "id">) => {
+    const saved = await updateOpponentInApi(id, opponent);
+    setOpponents((current) => current.map((item) => (item.id === saved.id ? saved : item)));
+    return saved;
+  };
+
+  const remove = async (id: string) => {
+    await deleteOpponentInApi(id);
+    setOpponents((current) => current.filter((item) => item.id !== id));
+  };
+
+  return { opponents, loading, error, refresh, create, update, remove };
+}
 
 const navItems: { href: string; labelKey: TranslationKey; view: View }[] = [
   { href: "/dashboard", labelKey: "dashboard", view: "dashboard" },
@@ -162,7 +425,7 @@ const translations = {
     basicSettings: "基本設定",
     nextOpponentSetting: "次の対戦相手",
     data: "データ",
-    resetSample: "サンプルデータに戻す",
+    resetSample: "端末設定を初期化",
     successRate: "成功率",
     averageTime: "平均タイム",
     averageScore: "平均スコア",
@@ -253,7 +516,7 @@ const translations = {
     basicSettings: "Basic Settings",
     nextOpponentSetting: "Next Opponent",
     data: "Data",
-    resetSample: "Reset Sample Data",
+    resetSample: "Reset Local Settings",
     successRate: "Success Rate",
     averageTime: "Average Time",
     averageScore: "Average Score",
@@ -306,31 +569,30 @@ const emptyOfficialTournament = (): Omit<OfficialTournament, "id"> => ({
   memo: "",
 });
 
-function migrateTournaments(data: CoachData): Tournament[] {
-  if (data.tournaments?.length) return data.tournaments;
-  if (!data.settings.tournamentDate && !data.settings.tournamentName) return sampleData.tournaments ?? [];
-  return [{ id: "legacy-tournament", name: data.settings.tournamentName || "大会", date: data.settings.tournamentDate, goal: "", memo: "" }];
-}
+const emptyCoachData = (): CoachData => ({
+  logs: [],
+  opponents: [],
+  tournaments: [],
+  officialTournaments: [],
+  settings: sampleData.settings,
+});
 
 function useCoachData() {
-  const [data, setData] = useState<CoachData>(sampleData);
+  const [data, setData] = useState<CoachData>(emptyCoachData);
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
-    let nextData = sampleData;
+    let nextData = emptyCoachData();
     const saved = window.localStorage.getItem(storageKey);
     if (saved) {
       try {
-        const parsed = JSON.parse(saved) as CoachData;
+        const parsed = JSON.parse(saved) as Partial<CoachData>;
         nextData = {
-          ...parsed,
-          tournaments: migrateTournaments(parsed),
-          officialTournaments: parsed.officialTournaments ?? sampleData.officialTournaments ?? [],
-          logs: parsed.logs.map(normalizeStoredLog),
+          ...emptyCoachData(),
           settings: { ...sampleData.settings, ...parsed.settings },
         };
       } catch {
-        nextData = sampleData;
+        nextData = emptyCoachData();
       }
     }
     const timer = window.setTimeout(() => {
@@ -342,7 +604,7 @@ function useCoachData() {
 
   useEffect(() => {
     if (!mounted) return;
-    window.localStorage.setItem(storageKey, JSON.stringify(data));
+    window.localStorage.setItem(storageKey, JSON.stringify({ settings: data.settings }));
   }, [data, mounted]);
 
   return { data, setData, mounted };
@@ -387,35 +649,24 @@ function useUiPreferences() {
 export function CoachApp({ view }: { view: View }) {
   const { data, setData, mounted } = useCoachData();
   const { theme, setTheme, language, setLanguage } = useUiPreferences();
+  const practiceLogs = usePracticeLogs();
+  const tournamentsState = useTournaments();
+  const officialTournamentsState = useOfficialTournaments();
+  const opponentsState = useOpponents();
   const t = useMemo<Translator>(() => (key) => translations[language][key] ?? translations.ja[key], [language]);
-  const logs = useMemo(() => data.logs.map(normalizeStoredLog), [data.logs]);
-  const stats = useMemo(() => getDisciplineStats(logs), [logs]);
-  const trend = useMemo(() => getRecentTrend(logs), [logs]);
-  const nextOpponent = data.opponents.find((opponent) => opponent.id === data.settings.nextOpponentId);
+  const trend = useMemo(() => getRecentTrend(practiceLogs.logs), [practiceLogs.logs]);
+  const nextOpponent = opponentsState.opponents.find((opponent) => opponent.id === data.settings.nextOpponentId) ?? opponentsState.opponents[0];
 
-  const addLogs = (newLogs: Omit<PracticeLog, "id">[]) => {
-    setData((current) => ({
-      ...current,
-      logs: [...newLogs.map((log) => ({ ...log, id: crypto.randomUUID() })), ...current.logs.map(normalizeStoredLog)],
-    }));
-  };
-  const updateLog = (log: PracticeLog) => setData((current) => ({ ...current, logs: updatePracticeLogInline(current.logs, log) }));
-  const removeLog = (id: string) => setData((current) => ({ ...current, logs: deletePracticeLog(current.logs, id) }));
-  const addOpponent = (opponent: Omit<Opponent, "id">) => setData((current) => ({ ...current, opponents: [{ ...opponent, id: crypto.randomUUID() }, ...current.opponents] }));
-  const setTournaments = (tournaments: Tournament[]) => setData((current) => saveTournaments(current, tournaments));
-  const setOfficialTournaments = (officialTournaments: OfficialTournament[]) => setData((current) => saveOfficialTournaments(current, officialTournaments));
-  const removeOfficialTournament = (id: string) => setData((current) => deleteOfficialTournament(current, id));
-
-  const normalizedData = { ...data, logs, tournaments: data.tournaments ?? [], officialTournaments: data.officialTournaments ?? [] };
+  const normalizedData = { ...data, logs: practiceLogs.logs, tournaments: tournamentsState.tournaments, officialTournaments: officialTournamentsState.officialTournaments, opponents: opponentsState.opponents };
   const content = {
-    dashboard: <Dashboard data={normalizedData} stats={stats} trend={trend} opponent={nextOpponent} mounted={mounted} onAdd={(log) => addLogs([log])} />,
-    practice: <Practice logs={logs} officialTournaments={normalizedData.officialTournaments} onAdd={(log) => addLogs([log])} onUpdate={updateLog} onDelete={removeLog} />,
-    import: <ImportPage officialTournaments={normalizedData.officialTournaments} onImport={addLogs} />,
-    analytics: <Analytics logs={logs} officialTournaments={normalizedData.officialTournaments} />,
-    opponents: <Opponents opponents={data.opponents} onAdd={addOpponent} />,
-    "match-plan": <MatchPlan data={normalizedData} setData={setData} />,
-    "weekly-review": <WeeklyReview logs={logs} />,
-    settings: <SettingsView data={normalizedData} setData={setData} setTournaments={setTournaments} setOfficialTournaments={setOfficialTournaments} deleteOfficialTournament={removeOfficialTournament} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} />,
+    dashboard: <Dashboard data={normalizedData} opponent={nextOpponent} practiceLogs={practiceLogs} tournamentsState={tournamentsState} />,
+    practice: <Practice officialTournaments={officialTournamentsState.officialTournaments} officialTournamentsLoading={officialTournamentsState.loading} practiceLogs={practiceLogs} />,
+    import: <ImportPage officialTournaments={officialTournamentsState.officialTournaments} onSaved={practiceLogs.refresh} />,
+    analytics: <Analytics officialTournaments={officialTournamentsState.officialTournaments} practiceLogs={practiceLogs} />,
+    opponents: <Opponents opponentsState={opponentsState} />,
+    "match-plan": <MatchPlan data={normalizedData} setData={setData} opponentsState={opponentsState} />,
+    "weekly-review": <WeeklyReview practiceLogs={practiceLogs} />,
+    settings: <SettingsView data={normalizedData} setData={setData} tournamentsState={tournamentsState} officialTournamentsState={officialTournamentsState} opponentsState={opponentsState} refreshPracticeLogs={practiceLogs.refresh} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} />,
   }[view];
 
   return (
@@ -431,7 +682,7 @@ export function CoachApp({ view }: { view: View }) {
               <span className="min-w-0 text-base font-bold leading-tight sm:text-lg">Memory Sports Analytics</span>
             </Link>
             <div className="hidden rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-right text-xs text-zinc-600 sm:block">
-              {t("recent7Days")} <span className="font-semibold text-zinc-950">{mounted ? `${trend.attempts}回` : "--"}</span>
+              {t("recent7Days")} <span className="font-semibold text-zinc-950">{mounted && !practiceLogs.loading ? `${trend.attempts}回` : "--"}</span>
             </div>
           </div>
           <nav className="flex gap-2 overflow-x-auto pb-1">
@@ -449,11 +700,27 @@ export function CoachApp({ view }: { view: View }) {
   );
 }
 
-function Dashboard({ data, stats, trend, opponent, mounted, onAdd }: { data: CoachData; stats: ReturnType<typeof getDisciplineStats>; trend: ReturnType<typeof getRecentTrend>; opponent?: Opponent; mounted: boolean; onAdd: (log: Omit<PracticeLog, "id">) => void }) {
+function Dashboard({ data, opponent, practiceLogs, tournamentsState }: { data: CoachData; opponent?: Opponent; practiceLogs: ReturnType<typeof usePracticeLogs>; tournamentsState: ReturnType<typeof useTournaments> }) {
   const t = useT();
+  const [notice, setNotice] = useState("");
+  const { logs, loading, error } = practiceLogs;
+
+  const addLog = async (log: Omit<PracticeLog, "id">) => {
+    setNotice("");
+    try {
+      await practiceLogs.createLog(log);
+      setNotice("保存しました。");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const nextTournament = getNextTournament(data.tournaments ?? []);
-  const practiceMenu = generatePracticeMenu(data.logs);
-  const latest = data.logs.slice(0, 5);
+  const stats = useMemo(() => getDisciplineStats(logs), [logs]);
+  const trend = useMemo(() => getRecentTrend(logs), [logs]);
+  const practiceMenu = useMemo(() => generatePracticeMenu(logs), [logs]);
+  const latest = useMemo(() => logs.slice(0, 5), [logs]);
   const upcomingTournaments = sortTournaments(data.tournaments ?? []).filter((tournament) => {
     const remaining = daysUntil(tournament.date);
     return remaining === null || remaining >= 0;
@@ -461,9 +728,11 @@ function Dashboard({ data, stats, trend, opponent, mounted, onAdd }: { data: Coa
 
   return (
     <Page title={t("dashboard")} subtitle="">
+      {notice && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{notice}</p>}
+      {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{error}</p>}
       <div className="grid gap-5 xl:grid-cols-[1.35fr_1fr]">
         <Panel title={t("todayPracticeMenu")}>
-          <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
+          {loading ? <p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p> : <div className="grid gap-2 sm:grid-cols-2 2xl:grid-cols-3">
             {practiceMenu.map((item) => (
               <div key={item.discipline} className="rounded-lg border bg-white p-3" style={getDisciplineCardStyle(item.discipline)}>
                 <DisciplineBadge discipline={item.discipline} />
@@ -471,20 +740,20 @@ function Dashboard({ data, stats, trend, opponent, mounted, onAdd }: { data: Coa
                 <p className="mt-1 text-xs leading-5 text-zinc-700">{item.reason}</p>
               </div>
             ))}
-          </div>
+          </div>}
         </Panel>
         <Panel title={t("tournaments")}>
-          {upcomingTournaments.length === 0 ? <p className="text-sm text-zinc-600">{t("noUpcomingTournaments")}</p> : <TournamentList tournaments={upcomingTournaments} nextTournamentId={nextTournament?.id} />}
+          {tournamentsState.loading ? <p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p> : tournamentsState.error ? <p className="text-sm font-semibold text-rose-700 dark:text-rose-200">{tournamentsState.error}</p> : upcomingTournaments.length === 0 ? <p className="text-sm text-zinc-600">{t("noUpcomingTournaments")}</p> : <TournamentList tournaments={upcomingTournaments} nextTournamentId={nextTournament?.id} />}
         </Panel>
       </div>
-      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={data.officialTournaments ?? []} onAdd={onAdd} /></Panel>
+      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={data.officialTournaments ?? []} onAdd={addLog} /></Panel>
       <div className="grid gap-4 lg:grid-cols-3">
-        <Metric label={t("recentTrend")} value={mounted ? `${trend.attempts}回` : "--"} detail={mounted ? `${trend.successes}成功 / ${t("recent7Days")}` : t("recent7Days")} />
+        <Metric label={t("recentTrend")} value={loading ? "--" : `${trend.attempts}回`} detail={loading ? t("recent7Days") : `${trend.successes}成功 / ${t("recent7Days")}`} />
         <Metric label={t("nextOpponent")} value={opponent?.name ?? t("unset")} detail={t("matchPlan")} />
-        <Metric label={t("todayTotal")} value={`${practiceMenu.reduce((sum, item) => sum + item.count, 0)}回`} detail={t("todayPracticeMenu")} />
+        <Metric label={t("todayTotal")} value={loading ? "--" : `${practiceMenu.reduce((sum, item) => sum + item.count, 0)}回`} detail={t("todayPracticeMenu")} />
       </div>
-      <Panel title={t("recentRecords")}><LogList logs={latest} officialTournaments={data.officialTournaments ?? []} /></Panel>
-      <Panel title={t("analytics")}><StatsGrid stats={stats} /></Panel>
+      <Panel title={t("recentRecords")}>{loading ? <p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p> : <LogList logs={latest} officialTournaments={data.officialTournaments ?? []} />}</Panel>
+      <Panel title={t("analytics")}>{loading ? <p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p> : <StatsGrid stats={stats} />}</Panel>
     </Page>
   );
 }
@@ -528,23 +797,61 @@ function TournamentCard({ tournament, isNext }: { tournament: Tournament; isNext
   );
 }
 
-function Practice({ logs, officialTournaments, onAdd, onUpdate, onDelete }: { logs: PracticeLog[]; officialTournaments: OfficialTournament[]; onAdd: (log: Omit<PracticeLog, "id">) => void; onUpdate: (log: PracticeLog) => void; onDelete: (id: string) => void }) {
+function Practice({ officialTournaments, officialTournamentsLoading, practiceLogs }: { officialTournaments: OfficialTournament[]; officialTournamentsLoading: boolean; practiceLogs: ReturnType<typeof usePracticeLogs> }) {
   const t = useT();
+  const [notice, setNotice] = useState("");
+  const { logs, loading, error } = practiceLogs;
+
+  const addLog = async (log: Omit<PracticeLog, "id">) => {
+    setNotice("");
+    try {
+      await practiceLogs.createLog(log);
+      setNotice("保存しました。");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const updateLog = async (log: PracticeLog) => {
+    setNotice("");
+    try {
+      await practiceLogs.updateLog(log);
+      setNotice("保存しました。");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const deleteLog = async (id: string) => {
+    setNotice("");
+    try {
+      await practiceLogs.deleteLog(id);
+      setNotice("削除しました。");
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   return (
     <Page title={t("practiceInput")} subtitle="">
-      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={officialTournaments} onAdd={onAdd} /></Panel>
-      <EditableLogsTable logs={logs} officialTournaments={officialTournaments} onUpdate={onUpdate} onDelete={onDelete} />
+      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={officialTournaments} officialTournamentsLoading={officialTournamentsLoading} onAdd={addLog} /></Panel>
+      {notice && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{notice}</p>}
+      {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</p>}
+      {loading ? <Panel title={t("recentRecords")}><p className="text-sm text-zinc-600">読み込み中...</p></Panel> : <EditableLogsTable logs={logs} officialTournaments={officialTournaments} onUpdate={updateLog} onDelete={deleteLog} />}
     </Page>
   );
 }
 
-function DailyLogForm({ officialTournaments, onAdd }: { officialTournaments: OfficialTournament[]; onAdd: (log: Omit<PracticeLog, "id">) => void }) {
+function DailyLogForm({ officialTournaments, officialTournamentsLoading = false, onAdd }: { officialTournaments: OfficialTournament[]; officialTournamentsLoading?: boolean; onAdd: (log: Omit<PracticeLog, "id">) => boolean | Promise<boolean> }) {
   const t = useT();
   const [form, setForm] = useState<PracticeLogFormState>(emptyLog);
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    onAdd(normalizeMemoryLeagueLog({ ...form, score: form.score === "" ? undefined : form.score, time: form.time === "" ? undefined : form.time }));
-    setForm(emptyLog());
+    const ok = await onAdd(normalizeMemoryLeagueLog({ ...form, score: form.score === "" ? undefined : form.score, time: form.time === "" ? undefined : form.time }));
+    if (ok) setForm(emptyLog());
   };
   const scoreField = <NumberField label={t("score")} value={form.score} onChange={(score) => setForm({ ...form, score })} placeholder="例: 52" />;
   const timeField = <NumberField label={t("time")} value={form.time} onChange={(time) => setForm({ ...form, time })} placeholder="例: 48.07" step="0.01" />;
@@ -570,7 +877,9 @@ function DailyLogForm({ officialTournaments, onAdd }: { officialTournaments: Off
       {form.mode === "official" && (
         <div className="grid gap-4 md:grid-cols-3">
           <Field label={t("officialTournament")}>
-            {officialTournaments.length > 0 ? (
+            {officialTournamentsLoading ? (
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">読み込み中...</div>
+            ) : officialTournaments.length > 0 ? (
               <select className="input" value={form.officialTournamentId ?? ""} onChange={(event) => setForm({ ...form, officialTournamentId: event.target.value || undefined })}>
                 <option value="">{t("officialTournamentUnset")}</option>
                 {officialTournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournament.name}</option>)}
@@ -598,14 +907,58 @@ function DailyLogForm({ officialTournaments, onAdd }: { officialTournaments: Off
   );
 }
 
-function ImportPage({ officialTournaments, onImport }: { officialTournaments: OfficialTournament[]; onImport: (logs: Omit<PracticeLog, "id">[]) => void }) {
+type ImportSaveSummary = {
+  success: number;
+  failed: number;
+  failures: { index: number; log: Omit<PracticeLog, "id">; error: string }[];
+};
+
+async function saveImportedLogsToDb(logs: Omit<PracticeLog, "id">[]): Promise<ImportSaveSummary> {
+  const summary: ImportSaveSummary = { success: 0, failed: 0, failures: [] };
+
+  for (const [index, log] of logs.entries()) {
+    const importLog = { ...log, source: "import" as const };
+    try {
+      await createPracticeLogInApi(practiceLogToDbPayload(importLog), "インポートログの保存に失敗しました。");
+      summary.success += 1;
+    } catch (error) {
+      summary.failed += 1;
+      summary.failures.push({
+        index,
+        log,
+        error: error instanceof Error ? error.message : "インポートログの保存に失敗しました。",
+      });
+    }
+  }
+
+  return summary;
+}
+
+function ImportSaveMessage({ summary }: { summary: ImportSaveSummary | null }) {
+  if (!summary) return null;
+  return (
+    <div className={`mt-3 rounded-md border px-3 py-2 text-sm font-semibold ${summary.failed > 0 ? "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200" : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"}`}>
+      <p>インポート完了：{summary.success}件のログを追加しました{summary.failed > 0 ? ` / 失敗: ${summary.failed}件` : ""}</p>
+      {summary.failures.length > 0 && (
+        <ul className="mt-2 grid gap-1 text-xs font-medium">
+          {summary.failures.map((failure) => (
+            <li key={`${failure.log.date}-${failure.log.discipline}-${failure.index}`}>#{failure.index + 1} {failure.log.discipline} Score {failure.log.score ?? "-"} Time {failure.log.time ?? "-"}: {failure.error}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function ImportPage({ officialTournaments, onSaved }: { officialTournaments: OfficialTournament[]; onSaved: () => Promise<void> }) {
   const t = useT();
   const [mode, setMode] = useState<LogMode>("train");
   const [discipline, setDiscipline] = useState<Discipline>("Cards");
   const [date, setDate] = useState(todayIso());
   const [text, setText] = useState("");
   const [importMemo, setImportMemo] = useState("");
-  const [imported, setImported] = useState(0);
+  const [importSummary, setImportSummary] = useState<ImportSaveSummary | null>(null);
+  const [importSaving, setImportSaving] = useState(false);
   const [matchPlayerName, setMatchPlayerName] = useState("Yas");
   const [matchMode, setMatchMode] = useState<Extract<LogMode, "rated" | "official">>("rated");
   const [matchDate, setMatchDate] = useState(todayIso());
@@ -613,7 +966,8 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
   const [matchOfficialRound, setMatchOfficialRound] = useState("");
   const [matchText, setMatchText] = useState("");
   const [matchMemo, setMatchMemo] = useState("");
-  const [matchImported, setMatchImported] = useState(0);
+  const [matchSummary, setMatchSummary] = useState<ImportSaveSummary | null>(null);
+  const [matchSaving, setMatchSaving] = useState(false);
   const result = useMemo(() => parseMemoryLeagueImportText({ text, mode, discipline, date }), [date, discipline, mode, text]);
   const matchParseResult = useMemo(() => parseMatchResultText(matchText), [matchText]);
   const matchPreview = useMemo(() => {
@@ -638,19 +992,39 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
     if (logs.length === 0) warnings.push("取り込み件数 0件");
     return { logs, warnings };
   }, [matchDate, matchMemo, matchMode, matchOfficialRound, matchOfficialTournamentId, matchParseResult.matches, matchParseResult.warnings, matchPlayerName]);
-  const importLogs = () => {
+  const importLogs = async () => {
     if (result.logs.length === 0 || result.errors.length > 0) return;
-    onImport(result.logs.map((log) => normalizeMemoryLeagueLog({ ...log, memo: importMemo })));
-    setImported(result.logs.length);
-    setText("");
-    setImportMemo("");
+    setImportSaving(true);
+    setImportSummary(null);
+    const summary = await saveImportedLogsToDb(result.logs.map((log) => normalizeMemoryLeagueLog({ ...log, memo: importMemo })));
+    setImportSummary(summary);
+    if (summary.success > 0) {
+      await onSaved().catch(() => {
+        // Import succeeded; the shared log state can be refreshed from another page if this fails.
+      });
+    }
+    setImportSaving(false);
+    if (summary.failed === 0) {
+      setText("");
+      setImportMemo("");
+    }
   };
-  const importMatchLogs = () => {
+  const importMatchLogs = async () => {
     if (matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate) return;
-    onImport(matchPreview.logs.map(normalizeMatchImportLog));
-    setMatchImported(matchPreview.logs.length);
-    setMatchText("");
-    setMatchMemo("");
+    setMatchSaving(true);
+    setMatchSummary(null);
+    const summary = await saveImportedLogsToDb(matchPreview.logs.map(normalizeMatchImportLog));
+    setMatchSummary(summary);
+    if (summary.success > 0) {
+      await onSaved().catch(() => {
+        // Import succeeded; the shared log state can be refreshed from another page if this fails.
+      });
+    }
+    setMatchSaving(false);
+    if (summary.failed === 0) {
+      setMatchText("");
+      setMatchMemo("");
+    }
   };
 
   return (
@@ -676,18 +1050,18 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
             ))}
           </div>
         </div>
-        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-56 font-mono text-sm" value={text} onChange={(event) => { setImported(0); setText(event.target.value); }} placeholder={mode === "train" ? "Score: 0\nTime: 0.69 sec" : "Time: 48.07s\nScore: 52"} /></Field>
-        <Field label={t("memo")}><textarea className="input mt-4 min-h-24 resize-y" value={importMemo} onChange={(event) => { setImported(0); setImportMemo(event.target.value); }} placeholder="メモ" /></Field>
+        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-56 font-mono text-sm" value={text} onChange={(event) => { setImportSummary(null); setText(event.target.value); }} placeholder={mode === "train" ? "Score: 0\nTime: 0.69 sec" : "Time: 48.07s\nScore: 52"} /></Field>
+        <Field label={t("memo")}><textarea className="input mt-4 min-h-24 resize-y" value={importMemo} onChange={(event) => { setImportSummary(null); setImportMemo(event.target.value); }} placeholder="メモ" /></Field>
       </Panel>
-      {result.errors.length > 0 && <Panel title="エラー"><ul className="grid gap-2 text-sm text-rose-700">{result.errors.map((error) => <li key={error} className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2">{error}</li>)}</ul></Panel>}
+      {result.errors.length > 0 && <Panel title="エラー"><ul className="grid gap-2 text-sm text-rose-700">{result.errors.map((error, index) => <li key={`${error}-${index}`} className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2">{error}</li>)}</ul></Panel>}
       <Panel title="プレビュー">
         {result.logs.length === 0 ? <p className="text-sm text-zinc-600">まだ記録を読み取れていません。</p> : <LogList logs={result.logs.map((log, index) => ({ ...normalizeMemoryLeagueLog(log), id: `preview-${index}` }))} />}
-        <button onClick={importLogs} disabled={result.logs.length === 0 || result.errors.length > 0} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-zinc-100 dark:text-zinc-950 dark:disabled:bg-zinc-700">{t("import")}</button>
-        {imported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">インポート完了：{imported}件のログを追加しました</p>}
+        <button onClick={importLogs} disabled={importSaving || result.logs.length === 0 || result.errors.length > 0} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-zinc-100 dark:text-zinc-950 dark:disabled:bg-zinc-700">{importSaving ? "保存中..." : t("import")}</button>
+        <ImportSaveMessage summary={importSummary} />
       </Panel>
       <Panel title="対戦結果貼り付けインポート">
         <div className="grid gap-4 md:grid-cols-4">
-          <Field label="対象選手名"><input className="input" value={matchPlayerName} onChange={(event) => { setMatchImported(0); setMatchPlayerName(event.target.value); }} placeholder="Yas" /></Field>
+          <Field label="対象選手名"><input className="input" value={matchPlayerName} onChange={(event) => { setMatchSummary(null); setMatchPlayerName(event.target.value); }} placeholder="Yas" /></Field>
           <Field label="Mode"><select className="input" value={matchMode} onChange={(event) => setMatchMode(event.target.value as Extract<LogMode, "rated" | "official">)}><option value="rated">Rated</option><option value="official">Official</option></select></Field>
           <Field label="日付"><input className="input" type="date" value={matchDate} onChange={(event) => setMatchDate(event.target.value)} /></Field>
           {matchMode === "official" && <Field label={t("officialRound")}><select className="input" value={matchOfficialRound} onChange={(event) => setMatchOfficialRound(event.target.value)}><option value="">-</option>{OFFICIAL_ROUNDS.map((round) => <option key={round} value={round}>{round}</option>)}</select></Field>}
@@ -702,14 +1076,14 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
             </Field>
           </div>
         )}
-        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-44 font-mono text-sm" value={matchText} onChange={(event) => { setMatchImported(0); setMatchText(event.target.value); }} placeholder={"Yas beat Katie Kermode in Numbers\n(80 in 48.24s / 74 in 44.82s) 4 hours ago\n\nKatie Kermode beat Yas in Cards\n(52 in 60.00s / 34 in 27.94s) 4 hours ago"} /></Field>
-        <Field label={t("memo")}><textarea className="input mt-4 min-h-24 resize-y" value={matchMemo} onChange={(event) => { setMatchImported(0); setMatchMemo(event.target.value); }} placeholder="メモ" /></Field>
+        <Field label="貼り付けテキスト"><textarea className="input mt-4 min-h-44 font-mono text-sm" value={matchText} onChange={(event) => { setMatchSummary(null); setMatchText(event.target.value); }} placeholder={"Yas beat Katie Kermode in Numbers\n(80 in 48.24s / 74 in 44.82s) 4 hours ago\n\nKatie Kermode beat Yas in Cards\n(52 in 60.00s / 34 in 27.94s) 4 hours ago"} /></Field>
+        <Field label={t("memo")}><textarea className="input mt-4 min-h-24 resize-y" value={matchMemo} onChange={(event) => { setMatchSummary(null); setMatchMemo(event.target.value); }} placeholder="メモ" /></Field>
       </Panel>
       {(matchParseResult.errors.length > 0 || matchPreview.warnings.length > 0) && (
         <Panel title="読み取り結果">
           <div className="grid gap-2 text-sm">
-            {matchParseResult.errors.map((error) => <div key={error} className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{error}</div>)}
-            {matchPreview.warnings.map((warning) => <div key={warning} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">{warning}</div>)}
+            {matchParseResult.errors.map((error, index) => <div key={`${error}-${index}`} className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-rose-700">{error}</div>)}
+            {matchPreview.warnings.map((warning, index) => <div key={`${warning}-${index}`} className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">{warning}</div>)}
           </div>
         </Panel>
       )}
@@ -724,21 +1098,23 @@ function ImportPage({ officialTournaments, onImport }: { officialTournaments: Of
             ))}
           </div>
         )}
-        <button onClick={importMatchLogs} disabled={matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-zinc-100 dark:text-zinc-950 dark:disabled:bg-zinc-700">{t("import")}</button>
-        {matchImported > 0 && <p className="mt-3 text-sm font-semibold text-emerald-700 dark:text-emerald-300">インポート完了：{matchImported}件のログを追加しました</p>}
+        <button onClick={importMatchLogs} disabled={matchSaving || matchPreview.logs.length === 0 || matchParseResult.errors.length > 0 || !matchPlayerName.trim() || !matchDate} className="mt-4 h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:bg-zinc-300 dark:bg-zinc-100 dark:text-zinc-950 dark:disabled:bg-zinc-700">{matchSaving ? "保存中..." : t("import")}</button>
+        <ImportSaveMessage summary={matchSummary} />
       </Panel>
     </Page>
   );
 }
 
-function Analytics({ logs, officialTournaments }: { logs: PracticeLog[]; officialTournaments: OfficialTournament[] }) {
+function Analytics({ officialTournaments, practiceLogs }: { officialTournaments: OfficialTournament[]; practiceLogs: ReturnType<typeof usePracticeLogs> }) {
   const t = useT();
+  const { logs, loading, error } = practiceLogs;
   const [modeFilter, setModeFilter] = useState<LogMode | "all">("all");
   const [officialTournamentFilter, setOfficialTournamentFilter] = useState<string | "all" | "unset">("all");
   const [selectedEvent, setSelectedEvent] = useState<EventFilter>("all");
   const [period, setPeriod] = useState<PeriodFilter>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+
   const months = useMemo(() => getAvailableMonths(logs), [logs]);
   const filteredLogs = useMemo(() => {
     const base = getAnalyticsFilterState({ logs, mode: modeFilter, discipline: selectedEvent, period, customFrom, customTo });
@@ -750,6 +1126,8 @@ function Analytics({ logs, officialTournaments }: { logs: PracticeLog[]; officia
 
   return (
     <Page title={t("analytics")} subtitle="">
+      {loading && <Panel title={t("analytics")}><p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p></Panel>}
+      {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{error}</p>}
       <Panel title={t("filters")}>
         <FilterButtons label={t("discipline")} items={[{ value: "all", label: t("allDisciplines") }, ...DISCIPLINES.map((discipline) => ({ value: discipline, label: discipline }))]} value={selectedEvent} onChange={(value) => setSelectedEvent(value as EventFilter)} />
         <FilterButtons label={t("period")} items={[{ value: "all", label: t("allPeriod") }, { value: "7", label: "7日" }, { value: "30", label: "30日" }, { value: "90", label: "90日" }, ...months.map((month) => ({ value: `month:${month}`, label: formatMonth(month) })), { value: "custom", label: t("custom") }]} value={period} onChange={(value) => setPeriod(value as PeriodFilter)} />
@@ -764,14 +1142,14 @@ function Analytics({ logs, officialTournaments }: { logs: PracticeLog[]; officia
           />
         )}
       </Panel>
-      {filteredLogs.length === 0 ? (
+      {!loading && !error && filteredLogs.length === 0 ? (
         <Panel title={t("analytics")}><p className="text-sm text-zinc-600">{t("noLogsInPeriod")}</p></Panel>
-      ) : selectedEvent === "all" ? (
+      ) : !loading && !error && selectedEvent === "all" ? (
         <>
           <Panel title={t("eventAnalysis")}><EventStatsGrid stats={eventCards} /></Panel>
           <Panel title={t("allLogs")}><LogList logs={filteredLogs} officialTournaments={officialTournaments} /></Panel>
         </>
-      ) : (
+      ) : !loading && !error ? (
         <>
           <Panel title={`${selectedEvent} ${t("eventAnalysis")}`}>
             <EventStatsGrid stats={selectedStats ? [selectedStats] : []} />
@@ -779,35 +1157,78 @@ function Analytics({ logs, officialTournaments }: { logs: PracticeLog[]; officia
           </Panel>
           <Panel title={`${selectedEvent} ${t("logList")}`}><LogList logs={filteredLogs} officialTournaments={officialTournaments} /></Panel>
         </>
-      )}
+      ) : null}
     </Page>
   );
 }
 
-function Opponents({ opponents, onAdd }: { opponents: Opponent[]; onAdd: (opponent: Omit<Opponent, "id">) => void }) {
+function Opponents({ opponentsState }: { opponentsState: ReturnType<typeof useOpponents> }) {
   const t = useT();
   const [form, setForm] = useState(emptyOpponent);
-  const submit = (event: React.FormEvent) => {
+  const [editingId, setEditingId] = useState<string | undefined>();
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const { opponents, loading } = opponentsState;
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.name.trim()) return;
-    onAdd({
+    setNotice("");
+    setError("");
+    const payload = {
       ...form,
       averages: normalizeOpponentNumbers(form.averages),
       successRates: normalizeOpponentNumbers(form.successRates),
-    });
-    setForm(emptyOpponent());
+    };
+    try {
+      if (editingId) {
+        await opponentsState.update(editingId, payload);
+        setEditingId(undefined);
+        setNotice("保存しました。");
+      } else {
+        await opponentsState.create(payload);
+        setNotice("追加しました。");
+      }
+      setForm(emptyOpponent());
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "対戦相手の保存に失敗しました。");
+    }
+  };
+  const startEdit = (opponent: Opponent) => {
+    setEditingId(opponent.id);
+    setForm({ name: opponent.name, averages: opponent.averages, successRates: opponent.successRates, memo: opponent.memo });
+  };
+  const remove = async (id: string) => {
+    if (!window.confirm("この対戦相手を削除しますか？")) return;
+    setNotice("");
+    setError("");
+    try {
+      await opponentsState.remove(id);
+      if (editingId === id) {
+        setEditingId(undefined);
+        setForm(emptyOpponent());
+      }
+      setNotice("削除しました。");
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "対戦相手の削除に失敗しました。");
+    }
   };
   return (
     <Page title={t("opponents")} subtitle="">
+      {opponentsState.error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{opponentsState.error}</p>}
+      {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{error}</p>}
+      {notice && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{notice}</p>}
       <Panel title={t("opponentInput")}>
         <form onSubmit={submit} className="grid gap-4">
           <Field label={t("playerName")}><input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder={t("playerName")} /></Field>
           <div className="grid gap-3 md:grid-cols-3">{DISCIPLINES.map((discipline) => <div key={discipline} className="rounded-lg border p-3" style={getDisciplineCardStyle(discipline)}><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><NumberField label="Time" value={form.averages[discipline]} onChange={(value) => setForm({ ...form, averages: { ...form.averages, [discipline]: value } })} placeholder="例: 48.07" step="0.01" /><NumberField label="Score" value={form.successRates[discipline]} onChange={(value) => setForm({ ...form, successRates: { ...form.successRates, [discipline]: value } })} placeholder="例: 52" step="0.1" /></div>)}</div>
           <Field label={t("memo")}><textarea className="input min-h-24" value={form.memo} onChange={(event) => setForm({ ...form, memo: event.target.value })} /></Field>
-          <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">{t("addOpponent")}</button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">{editingId ? t("save") : t("addOpponent")}</button>
+            {editingId && <button type="button" onClick={() => { setEditingId(undefined); setForm(emptyOpponent()); }} className="h-11 rounded-md border border-zinc-300 px-4 font-semibold hover:bg-zinc-50">{t("cancel")}</button>}
+          </div>
         </form>
       </Panel>
-      <div className="grid gap-4 lg:grid-cols-2">{opponents.map((opponent) => <Panel key={opponent.id} title={opponent.name}><div className="grid gap-2 sm:grid-cols-2">{DISCIPLINES.map((discipline) => <div key={discipline} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm"><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><span className="font-semibold">{formatTime(opponent.averages[discipline])}秒 / {percent(opponent.successRates[discipline])}</span></div>)}</div><p className="mt-4 text-sm text-zinc-600">{opponent.memo}</p></Panel>)}</div>
+      {loading ? <Panel title={t("opponents")}><p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p></Panel> : <div className="grid gap-4 lg:grid-cols-2">{opponents.map((opponent) => <Panel key={opponent.id} title={opponent.name}><div className="mb-4 flex gap-2"><button onClick={() => startEdit(opponent)} className="rounded-md border border-zinc-300 px-3 py-1 text-sm font-semibold hover:bg-white">{t("edit")}</button><button onClick={() => remove(opponent.id)} className="rounded-md border border-rose-300 px-3 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50">{t("delete")}</button></div><div className="grid gap-2 sm:grid-cols-2">{DISCIPLINES.map((discipline) => <div key={discipline} className="flex items-center justify-between gap-3 rounded-md bg-zinc-50 px-3 py-2 text-sm"><DisciplineBadge discipline={discipline} compact={discipline === "International Names"} /><span className="font-semibold">{formatTime(opponent.averages[discipline])}秒 / {percent(opponent.successRates[discipline])}</span></div>)}</div><p className="mt-4 text-sm text-zinc-600">{opponent.memo}</p></Panel>)}</div>}
     </Page>
   );
 }
@@ -816,13 +1237,14 @@ function normalizeOpponentNumbers(values: Record<Discipline, NumberInputValue>) 
   return Object.fromEntries(DISCIPLINES.map((discipline) => [discipline, values[discipline] === "" ? 0 : values[discipline]])) as Record<Discipline, number>;
 }
 
-function MatchPlan({ data, setData }: { data: CoachData; setData: React.Dispatch<React.SetStateAction<CoachData>> }) {
+function MatchPlan({ data, setData, opponentsState }: { data: CoachData; setData: React.Dispatch<React.SetStateAction<CoachData>>; opponentsState: ReturnType<typeof useOpponents> }) {
   const t = useT();
-  const opponent = data.opponents.find((item) => item.id === data.settings.nextOpponentId) ?? data.opponents[0];
+  const opponent = opponentsState.opponents.find((item) => item.id === data.settings.nextOpponentId) ?? opponentsState.opponents[0];
   const plan = buildMatchPlan(data.logs, opponent);
   return (
     <Page title={t("matchPlan")} subtitle="">
-      <Panel title={t("opponents")}><select className="input max-w-md" value={opponent?.id ?? ""} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}>{data.opponents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></Panel>
+      {opponentsState.error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{opponentsState.error}</p>}
+      <Panel title={t("opponents")}>{opponentsState.loading ? <p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p> : <select className="input max-w-md" value={opponent?.id ?? ""} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}>{opponentsState.opponents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</Panel>
       <div className="grid gap-4 md:grid-cols-4"><Metric label={t("targetDisciplines")} value={plan.targets.join(" / ") || "-"} detail={t("matchPlan")} /><Metric label={t("warningDisciplines")} value={plan.warnings.join(" / ") || "-"} detail={t("successRate")} /><Metric label={t("lowerPriority")} value={plan.discardable.join(" / ") || "-"} detail={t("discipline")} /><Metric label={t("preMatchMenu")} value={plan.menu.join(" / ")} detail={t("practiceInput")} /></div>
       <Panel title={t("practicePolicy")}><p className="text-lg font-semibold">{plan.winLine}</p></Panel>
       <Panel title={t("disciplineComparison")}><div className="grid gap-3">{plan.comparison.map((item) => <div key={item.discipline} className="rounded-lg border bg-white p-4" style={getDisciplineCardStyle(item.discipline)}><div className="flex flex-wrap items-center justify-between gap-2"><DisciplineBadge discipline={item.discipline} /><div className={item.edge >= 0 ? "font-semibold text-emerald-700" : "font-semibold text-rose-700"}>Edge {item.edge.toFixed(1)}</div></div><div className="mt-3 grid gap-2 text-sm sm:grid-cols-2"><div>{t("averageTime")} {formatTime(item.averageTime)}秒 / {t("successRate")} {percent(item.successRate)}</div><div>{t("opponents")} {formatTime(item.opponentAverage)}秒 / {t("successRate")} {percent(item.opponentSuccessRate)}</div></div></div>)}</div></Panel>
@@ -830,13 +1252,23 @@ function MatchPlan({ data, setData }: { data: CoachData; setData: React.Dispatch
   );
 }
 
-function WeeklyReview({ logs }: { logs: PracticeLog[] }) {
+function WeeklyReview({ practiceLogs }: { practiceLogs: ReturnType<typeof usePracticeLogs> }) {
   const t = useT();
+  const { logs, loading, error } = practiceLogs;
+
   const review = getWeeklyReview(logs);
   return (
     <Page title={t("weeklyReview")} subtitle="">
-      <div className="grid gap-4 md:grid-cols-4"><Metric label={t("weeklyAttempts")} value={`${review.attempts}回`} detail={t("recent7Days")} /><Metric label={t("mostImproved")} value={review.improved} detail={t("successRate")} /><Metric label={t("highFailure")} value={review.worstFailure} detail={t("practiceLogs")} /><Metric label={t("nextWeekFocus")} value={review.focus.join(" / ")} detail={t("discipline")} /></div>
-      <Panel title={t("nextWeekPolicy")}><div className="grid gap-3 md:grid-cols-3">{review.focus.map((discipline) => <div key={discipline} className="rounded-lg border bg-white p-4" style={getDisciplineCardStyle(discipline)}><DisciplineBadge discipline={discipline} /><p className="mt-2 text-sm">{t("practiceInput")}</p></div>)}<div className="rounded-lg border border-zinc-200 bg-white p-4"><div className="text-lg font-bold">{t("weeklyReview")}</div><p className="mt-2 text-sm text-zinc-600">{t("practiceLogs")}</p></div></div></Panel>
+      {loading && <Panel title={t("weeklyReview")}><p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p></Panel>}
+      {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{error}</p>}
+      {!loading && !error && logs.length === 0 ? (
+        <Panel title={t("weeklyReview")}><p className="text-sm text-zinc-600 dark:text-zinc-300">{t("insufficientData")}</p></Panel>
+      ) : !loading && !error ? (
+        <>
+          <div className="grid gap-4 md:grid-cols-4"><Metric label={t("weeklyAttempts")} value={`${review.attempts}回`} detail={t("recent7Days")} /><Metric label={t("mostImproved")} value={review.improved} detail={t("successRate")} /><Metric label={t("highFailure")} value={review.worstFailure} detail={t("practiceLogs")} /><Metric label={t("nextWeekFocus")} value={review.focus.join(" / ")} detail={t("discipline")} /></div>
+          <Panel title={t("nextWeekPolicy")}><div className="grid gap-3 md:grid-cols-3">{review.focus.map((discipline) => <div key={discipline} className="rounded-lg border bg-white p-4" style={getDisciplineCardStyle(discipline)}><DisciplineBadge discipline={discipline} /><p className="mt-2 text-sm">{t("practiceInput")}</p></div>)}<div className="rounded-lg border border-zinc-200 bg-white p-4"><div className="text-lg font-bold">{t("weeklyReview")}</div><p className="mt-2 text-sm text-zinc-600">{t("practiceLogs")}</p></div></div></Panel>
+        </>
+      ) : null}
     </Page>
   );
 }
@@ -844,9 +1276,10 @@ function WeeklyReview({ logs }: { logs: PracticeLog[] }) {
 function SettingsView({
   data,
   setData,
-  setTournaments,
-  setOfficialTournaments,
-  deleteOfficialTournament,
+  tournamentsState,
+  officialTournamentsState,
+  opponentsState,
+  refreshPracticeLogs,
   theme,
   setTheme,
   language,
@@ -854,60 +1287,86 @@ function SettingsView({
 }: {
   data: CoachData;
   setData: React.Dispatch<React.SetStateAction<CoachData>>;
-  setTournaments: (tournaments: Tournament[]) => void;
-  setOfficialTournaments: (officialTournaments: OfficialTournament[]) => void;
-  deleteOfficialTournament: (id: string) => void;
+  tournamentsState: ReturnType<typeof useTournaments>;
+  officialTournamentsState: ReturnType<typeof useOfficialTournaments>;
+  opponentsState: ReturnType<typeof useOpponents>;
+  refreshPracticeLogs: () => Promise<void>;
   theme: ThemeMode;
   setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
   language: Language;
   setLanguage: React.Dispatch<React.SetStateAction<Language>>;
 }) {
   const t = useT();
-  const reset = () => setData(sampleData);
-  const tournaments = data.tournaments ?? [];
-  const officialTournaments = getOfficialTournaments(data);
+  const reset = () => setData((current) => ({ ...current, settings: sampleData.settings }));
+  const { tournaments } = tournamentsState;
+  const { officialTournaments } = officialTournamentsState;
   const [editingTournamentId, setEditingTournamentId] = useState<string | undefined>();
   const [form, setForm] = useState(emptyTournament);
   const [editingOfficialTournamentId, setEditingOfficialTournamentId] = useState<string | undefined>();
   const [officialForm, setOfficialForm] = useState(emptyOfficialTournament);
-  const submitTournament = (event: React.FormEvent) => {
+  const [settingsError, setSettingsError] = useState("");
+  const submitTournament = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.name.trim() || !form.date) return;
-    if (editingTournamentId) {
-      setTournaments(tournaments.map((tournament) => (tournament.id === editingTournamentId ? { ...tournament, ...form } : tournament)));
-      setEditingTournamentId(undefined);
-    } else {
-      setTournaments([{ ...form, id: crypto.randomUUID() }, ...tournaments]);
+    setSettingsError("");
+    try {
+      if (editingTournamentId) {
+        await tournamentsState.update(editingTournamentId, form);
+        setEditingTournamentId(undefined);
+      } else {
+        await tournamentsState.create(form);
+      }
+      setForm(emptyTournament());
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "大会の保存に失敗しました。");
     }
-    setForm(emptyTournament());
   };
   const startTournamentEdit = (tournament: Tournament) => {
     setEditingTournamentId(tournament.id);
     setForm({ name: tournament.name, date: tournament.date, goal: tournament.goal ?? "", memo: tournament.memo ?? "" });
   };
-  const removeTournament = (id: string) => {
-    if (window.confirm("この大会を削除しますか？")) setTournaments(tournaments.filter((tournament) => tournament.id !== id));
+  const removeTournament = async (id: string) => {
+    if (!window.confirm("この大会を削除しますか？")) return;
+    setSettingsError("");
+    try {
+      await tournamentsState.remove(id);
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "大会の削除に失敗しました。");
+    }
   };
-  const submitOfficialTournament = (event: React.FormEvent) => {
+  const submitOfficialTournament = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!officialForm.name.trim() || !officialForm.date) return;
-    if (editingOfficialTournamentId) {
-      setOfficialTournaments(updateOfficialTournament(officialTournaments, { ...officialForm, id: editingOfficialTournamentId }));
-      setEditingOfficialTournamentId(undefined);
-    } else {
-      setOfficialTournaments([{ ...officialForm, id: crypto.randomUUID() }, ...officialTournaments]);
+    setSettingsError("");
+    try {
+      if (editingOfficialTournamentId) {
+        await officialTournamentsState.update(editingOfficialTournamentId, officialForm);
+        setEditingOfficialTournamentId(undefined);
+      } else {
+        await officialTournamentsState.create(officialForm);
+      }
+      setOfficialForm(emptyOfficialTournament());
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Official大会の保存に失敗しました。");
     }
-    setOfficialForm(emptyOfficialTournament());
   };
   const startOfficialTournamentEdit = (tournament: OfficialTournament) => {
     setEditingOfficialTournamentId(tournament.id);
     setOfficialForm({ name: tournament.name, date: tournament.date, memo: tournament.memo ?? "" });
   };
-  const removeOfficialTournament = (id: string) => {
-    if (window.confirm("このOfficial大会を削除しますか？")) deleteOfficialTournament(id);
+  const removeOfficialTournament = async (id: string) => {
+    if (!window.confirm("このOfficial大会を削除しますか？")) return;
+    setSettingsError("");
+    try {
+      await officialTournamentsState.remove(id);
+      await refreshPracticeLogs().catch(() => {});
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "Official大会の削除に失敗しました。");
+    }
   };
   return (
     <Page title={t("settings")} subtitle="">
+      {(settingsError || tournamentsState.error || officialTournamentsState.error) && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{settingsError || tournamentsState.error || officialTournamentsState.error}</p>}
       <Panel title={t("displaySettings")}>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
@@ -943,7 +1402,7 @@ function SettingsView({
           </div>
         </form>
         <div className="mt-4 grid gap-3 md:grid-cols-2">
-          {officialTournaments.length === 0 ? <p className="text-sm text-zinc-600">{t("officialTournamentRegisterHint")}</p> : officialTournaments.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((tournament) => (
+          {officialTournamentsState.loading ? <p className="text-sm text-zinc-600">読み込み中...</p> : officialTournaments.length === 0 ? <p className="text-sm text-zinc-600">{t("officialTournamentRegisterHint")}</p> : officialTournaments.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((tournament) => (
             <article key={tournament.id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -961,14 +1420,14 @@ function SettingsView({
         </div>
       </Panel>
       <Panel title={editingTournamentId ? t("tournamentEdit") : t("tournamentAdd")}><form onSubmit={submitTournament} className="grid gap-4 md:grid-cols-2"><Field label={t("tournamentName")}><input className="input" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例: 日本大会" /></Field><Field label={t("tournamentDate")}><input className="input" type="date" value={form.date} onChange={(event) => setForm({ ...form, date: event.target.value })} /></Field><Field label={t("goal")}><input className="input" value={form.goal ?? ""} onChange={(event) => setForm({ ...form, goal: event.target.value })} placeholder="例: Cardsを安定して取る" /></Field><Field label={t("memo")}><textarea className="input min-h-24 resize-y" value={form.memo ?? ""} onChange={(event) => setForm({ ...form, memo: event.target.value })} /></Field><div className="flex flex-col gap-2 md:col-span-2 sm:flex-row"><button className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white">{editingTournamentId ? t("save") : t("tournamentAdd")}</button>{editingTournamentId && <button type="button" onClick={() => { setEditingTournamentId(undefined); setForm(emptyTournament()); }} className="h-11 rounded-md border border-zinc-300 px-4 font-semibold hover:bg-zinc-50">{t("cancel")}</button>}</div></form></Panel>
-      <Panel title={t("tournaments")}>{tournaments.length === 0 ? <p className="text-sm text-zinc-600">大会が登録されていません。</p> : <div className="grid gap-3 md:grid-cols-2">{tournaments.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((tournament) => <article key={tournament.id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-lg font-black">{tournament.name}</div><div className="mt-1 text-sm text-zinc-600">{tournament.date}</div></div><div className="flex gap-2"><button onClick={() => startTournamentEdit(tournament)} className="rounded-md border border-zinc-300 px-3 py-1 text-sm font-semibold hover:bg-white">{t("edit")}</button><button onClick={() => removeTournament(tournament.id)} className="rounded-md border border-rose-300 px-3 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50">{t("delete")}</button></div></div>{tournament.goal && <p className="mt-3 text-sm font-semibold">{t("goal")}: {tournament.goal}</p>}{tournament.memo && <p className="mt-2 text-sm text-zinc-600">{tournament.memo}</p>}</article>)}</div>}</Panel>
-      <Panel title={t("basicSettings")}><div className="grid gap-4 md:grid-cols-2"><Field label={t("playerName")}><input className="input" value={data.settings.playerName} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, playerName: event.target.value } }))} /></Field><Field label={t("nextOpponentSetting")}><select className="input" value={data.settings.nextOpponentId} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}>{data.opponents.map((opponent) => <option key={opponent.id} value={opponent.id}>{opponent.name}</option>)}</select></Field></div></Panel>
+      <Panel title={t("tournaments")}>{tournamentsState.loading ? <p className="text-sm text-zinc-600">読み込み中...</p> : tournaments.length === 0 ? <p className="text-sm text-zinc-600">大会が登録されていません。</p> : <div className="grid gap-3 md:grid-cols-2">{tournaments.slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()).map((tournament) => <article key={tournament.id} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4"><div className="flex items-start justify-between gap-3"><div><div className="text-lg font-black">{tournament.name}</div><div className="mt-1 text-sm text-zinc-600">{tournament.date}</div></div><div className="flex gap-2"><button onClick={() => startTournamentEdit(tournament)} className="rounded-md border border-zinc-300 px-3 py-1 text-sm font-semibold hover:bg-white">{t("edit")}</button><button onClick={() => removeTournament(tournament.id)} className="rounded-md border border-rose-300 px-3 py-1 text-sm font-semibold text-rose-700 hover:bg-rose-50">{t("delete")}</button></div></div>{tournament.goal && <p className="mt-3 text-sm font-semibold">{t("goal")}: {tournament.goal}</p>}{tournament.memo && <p className="mt-2 text-sm text-zinc-600">{tournament.memo}</p>}</article>)}</div>}</Panel>
+      <Panel title={t("basicSettings")}><div className="grid gap-4 md:grid-cols-2"><Field label={t("playerName")}><input className="input" value={data.settings.playerName} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, playerName: event.target.value } }))} /></Field><Field label={t("nextOpponentSetting")}>{opponentsState.loading ? <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">読み込み中...</div> : <select className="input" value={data.settings.nextOpponentId} onChange={(event) => setData((current) => ({ ...current, settings: { ...current.settings, nextOpponentId: event.target.value } }))}>{opponentsState.opponents.map((opponent) => <option key={opponent.id} value={opponent.id}>{opponent.name}</option>)}</select>}</Field></div></Panel>
       <Panel title={t("data")}><p className="text-sm text-zinc-600">localStorage</p><button onClick={reset} className="mt-4 h-11 rounded-md border border-zinc-300 px-4 font-semibold hover:bg-zinc-50">{t("resetSample")}</button></Panel>
     </Page>
   );
 }
 
-function EditableLogsTable({ logs, officialTournaments, onUpdate, onDelete }: { logs: PracticeLog[]; officialTournaments: OfficialTournament[]; onUpdate: (log: PracticeLog) => void; onDelete: (id: string) => void }) {
+function EditableLogsTable({ logs, officialTournaments, onUpdate, onDelete }: { logs: PracticeLog[]; officialTournaments: OfficialTournament[]; onUpdate: (log: PracticeLog) => Promise<boolean>; onDelete: (id: string) => Promise<boolean> }) {
   const t = useT();
   const [editingId, setEditingId] = useState<string | undefined>();
   const [draft, setDraft] = useState<PracticeLogFormState>(emptyLog);
@@ -976,13 +1435,13 @@ function EditableLogsTable({ logs, officialTournaments, onUpdate, onDelete }: { 
     setEditingId(log.id);
     setDraft({ date: log.date, discipline: log.discipline, mode: log.mode ?? "train", officialTournamentId: log.officialTournamentId, officialRound: log.officialRound, opponentName: log.opponentName, score: log.score ?? "", time: log.time ?? "", memo: log.memo });
   };
-  const save = (id: string) => {
+  const save = async (id: string) => {
     const normalized = normalizeMemoryLeagueLog({ ...draft, score: draft.score === "" ? undefined : draft.score, time: draft.time === "" ? undefined : draft.time });
-    onUpdate({ ...normalized, id });
-    setEditingId(undefined);
+    const ok = await onUpdate({ ...normalized, id });
+    if (ok) setEditingId(undefined);
   };
-  const confirmDelete = (id: string) => {
-    if (window.confirm("このログを削除しますか？")) onDelete(id);
+  const confirmDelete = async (id: string) => {
+    if (window.confirm("このログを削除しますか？")) await onDelete(id);
   };
   return (
     <Panel title={t("recentRecords")}>
@@ -1012,9 +1471,9 @@ function LogTable({
   draft?: PracticeLogFormState;
   onDraftChange?: (draft: PracticeLogFormState) => void;
   onEdit?: (log: PracticeLog) => void;
-  onSave?: (id: string) => void;
+  onSave?: (id: string) => void | Promise<void>;
   onCancel?: () => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
 }) {
   const t = useT();
   const canEdit = Boolean(onEdit && onSave && onCancel && onDelete);
