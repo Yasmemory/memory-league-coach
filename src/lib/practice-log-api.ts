@@ -192,6 +192,16 @@ export function parsePracticeLogBody(body: unknown): { data: Prisma.PracticeLogU
   };
 }
 
+export function createExtensionFingerprint(data: Prisma.PracticeLogUncheckedCreateInput) {
+  const date = data.date instanceof Date ? dateOnly(data.date) : String(data.date);
+  const score = data.score === null || data.score === undefined ? "" : String(data.score);
+  const time = data.time === null || data.time === undefined ? "" : String(data.time);
+  const opponentName = typeof data.opponentName === "string" ? data.opponentName.trim().toLowerCase() : "";
+  const result = data.result ?? "";
+
+  return [date, data.discipline, score, time, opponentName, result].join("|");
+}
+
 export function toPracticeLogUpdateInput(data: Prisma.PracticeLogUncheckedCreateInput): Prisma.PracticeLogUncheckedUpdateInput {
   return {
     date: data.date,
