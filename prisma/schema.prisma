@@ -46,6 +46,7 @@ model PracticeLog {
   memo                 String?
   source               LogSource           @default(manual)
   extensionFingerprint String?             @unique
+  externalId            String?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   officialTournament   OfficialTournament? @relation(fields: [officialTournamentId], references: [id], onDelete: SetNull)

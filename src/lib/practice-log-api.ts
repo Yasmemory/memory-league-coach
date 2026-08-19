@@ -4,6 +4,7 @@ export type PracticeLogResponse = Omit<PracticeLog, "discipline" | "source" | "d
   date: string;
   discipline: "Cards" | "Images" | "International Names" | "Names" | "Numbers" | "Words";
   source: "manual" | "import" | "extension";
+  externalId?: string | null;
   officialTournament?: {
     id: string;
     name: string;
@@ -175,6 +176,9 @@ export function parsePracticeLogBody(body: unknown): { data: Prisma.PracticeLogU
   const source = typeof body.source === "string" ? sourceMap[body.source] : undefined;
   if (!source) return { error: "source is invalid." };
 
+  const externalId = parseNullableString(body.externalId);
+  if (externalId === undefined) return { error: "externalId must be a string or null." };
+
   return {
     data: {
       date,
@@ -188,6 +192,7 @@ export function parsePracticeLogBody(body: unknown): { data: Prisma.PracticeLogU
       officialRound,
       memo,
       source,
+      externalId,
     },
   };
 }
@@ -198,6 +203,12 @@ export function createExtensionFingerprint(data: Prisma.PracticeLogUncheckedCrea
   const time = data.time === null || data.time === undefined ? "" : String(data.time);
   const opponentName = typeof data.opponentName === "string" ? data.opponentName.trim().toLowerCase() : "";
   const result = data.result ?? "";
+
+  if (data.mode === "train") {
+    const externalId = typeof data.externalId === "string" ? data.externalId.trim() : "";
+    if (externalId) return `train:${externalId}`;
+    return ["train", date, data.discipline, score, time].join("|");
+  }
 
   return [date, data.discipline, score, time, opponentName, result].join("|");
 }
@@ -215,5 +226,6 @@ export function toPracticeLogUpdateInput(data: Prisma.PracticeLogUncheckedCreate
     officialRound: data.officialRound,
     memo: data.memo,
     source: data.source,
+    externalId: data.externalId,
   };
 }
