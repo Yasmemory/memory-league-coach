@@ -1,4 +1,4 @@
-import { Discipline, DISCIPLINES, LogMode, LOG_MODES, MatchResult, OfficialTournament, PracticeLog, Tournament } from "@/lib/types";
+import { Discipline, DISCIPLINES, LogMode, LOG_MODES, MatchResult, OfficialTournament, PracticeLog, SelfRating, Tournament } from "@/lib/types";
 
 export type ImportPreviewLog = {
   date: string;
@@ -74,6 +74,8 @@ export function normalizeMemoryLeagueLog(input: {
   officialRound?: string;
   opponentName?: string;
   result?: MatchResult;
+  routeId?: string | null;
+  selfRating?: SelfRating | null;
   score?: number;
   time?: number;
   memo?: string;
@@ -91,6 +93,8 @@ export function normalizeMemoryLeagueLog(input: {
     officialRound: mode === "official" ? input.officialRound?.trim() || undefined : undefined,
     opponentName: input.opponentName?.trim() || undefined,
     result: input.result,
+    routeId: input.routeId ?? null,
+    selfRating: input.selfRating ?? null,
     score,
     time,
     attempts: 1,

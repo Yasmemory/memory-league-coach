@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getPrismaClient } from "@/lib/prisma";
 import { parsePracticeLogBody, toPracticeLogResponse } from "@/lib/practice-log-api";
+import { validatePracticeLogRoute } from "@/lib/route-api";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ export async function GET() {
       take: 100,
       include: {
         officialTournament: true,
+        route: true,
       },
     });
 
@@ -37,6 +39,12 @@ export async function POST(request: Request) {
 
   try {
     const prisma = getPrismaClient();
+    const routeError = await validatePracticeLogRoute(parsed.data, (id) => prisma.route.findUnique({
+      where: { id },
+      select: { id: true, discipline: true },
+    }));
+    if (routeError) return NextResponse.json({ error: routeError }, { status: 400 });
+
     if (parsed.data.officialTournamentId) {
       const tournament = await prisma.officialTournament.findUnique({ where: { id: parsed.data.officialTournamentId } });
       if (!tournament) parsed.data.officialTournamentId = null;
@@ -46,6 +54,7 @@ export async function POST(request: Request) {
       data: parsed.data,
       include: {
         officialTournament: true,
+        route: true,
       },
     });
 

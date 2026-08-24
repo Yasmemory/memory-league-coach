@@ -19,7 +19,7 @@ import {
   record,
 } from "@/lib/analytics";
 import { sampleData } from "@/lib/sample-data";
-import { CoachData, Discipline, DISCIPLINE_COLORS, DISCIPLINES, LOG_MODES, LogMode, OFFICIAL_ROUNDS, OfficialTournament, Opponent, PracticeLog, Tournament } from "@/lib/types";
+import { CoachData, Discipline, DISCIPLINE_COLORS, DISCIPLINES, LOG_MODES, LogMode, OFFICIAL_ROUNDS, OfficialTournament, Opponent, PracticeLog, Route, SELF_RATINGS, SELF_RATING_SYMBOLS, SelfRating, Tournament } from "@/lib/types";
 import {
   deletePracticeLog,
   filterLogsByOfficialTournament,
@@ -36,7 +36,8 @@ import {
   parseMatchResultText,
   updatePracticeLogInline,
 } from "@/app/shared";
-import { createPracticeLogInApi, fetchPracticeLogsFromApi, readPracticeLogApiError, type PracticeLogRequest, type PracticeLogResponse as DbPracticeLogResponse } from "@/lib/practice-log-api";
+import { createPracticeLogInApi, fetchPracticeLogsFromApi, readPracticeLogApiError, updatePracticeLogSelfRatingInApi, type PracticeLogRequest, type PracticeLogResponse as DbPracticeLogResponse } from "@/lib/practice-log-api";
+import { filterLogsByRoute, filterLogsBySelfRating, getRouteAnalysis, getSelfRatingBreakdown, type AnalyticsRouteFilter, type AnalyticsSelfRatingFilter } from "@/lib/analytics-route-rating";
 import { createOpponentInApi, deleteOpponentInApi, fetchOpponentsFromApi, updateOpponentInApi } from "@/lib/opponent-api";
 import {
   createOfficialTournamentInApi,
@@ -48,6 +49,8 @@ import {
   updateOfficialTournamentInApi,
   updateTournamentInApi,
 } from "@/lib/tournament-api";
+import { ROUTE_DISCIPLINES, routeIdForDiscipline, routesForDiscipline, sortRoutesForSettings, type RouteDiscipline, type RouteInput } from "@/lib/route-api";
+import { useRoutes } from "@/hooks/use-routes";
 
 type View = "dashboard" | "practice" | "analytics" | "opponents" | "match-plan" | "weekly-review" | "settings" | "import";
 type NumberInputValue = number | "";
@@ -55,6 +58,7 @@ type EventFilter = Discipline | "all";
 type PeriodFilter = "all" | "7" | "30" | "90" | "custom" | `month:${string}`;
 type ThemeMode = "light" | "dark";
 type Language = "ja" | "en";
+type RouteFormState = RouteInput;
 type PracticeLogFormState = {
   date: string;
   discipline: Discipline;
@@ -65,6 +69,8 @@ type PracticeLogFormState = {
   score: NumberInputValue;
   time: NumberInputValue;
   memo: string;
+  routeId?: string | null;
+  selfRating?: SelfRating | null;
 };
 type OpponentFormState = {
   name: string;
@@ -101,6 +107,9 @@ function practiceLogFromDb(log: DbPracticeLogResponse): PracticeLog {
     averageRecord: log.time ?? 0,
     bestRecord: log.time ?? 0,
     memo: log.memo ?? "",
+    routeId: log.routeId ?? null,
+    selfRating: log.selfRating ?? null,
+    route: log.route ?? null,
   });
 }
 
@@ -117,6 +126,8 @@ function practiceLogToDbPayload(log: Omit<PracticeLog, "id"> | PracticeLog): Pra
     officialRound: log.officialRound ?? null,
     memo: log.memo ?? null,
     source: log.source ?? "manual",
+    routeId: log.routeId ?? null,
+    selfRating: log.selfRating ?? null,
   };
 }
 
@@ -198,7 +209,17 @@ function usePracticeLogs() {
     }
   };
 
-  return { logs, loading, error, refresh, createLog, updateLog, deleteLog };
+  const updateSelfRating = async (id: string, selfRating: SelfRating | null) => {
+    try {
+      const saved = practiceLogFromDb(await updatePracticeLogSelfRatingInApi(id, selfRating));
+      setLogs((current) => updatePracticeLogInline(current, saved));
+      return saved;
+    } catch (saveError) {
+      throw saveError;
+    }
+  };
+
+  return { logs, loading, error, refresh, createLog, updateLog, deleteLog, updateSelfRating };
 }
 
 function useTournaments() {
@@ -441,6 +462,21 @@ const translations = {
     displaySettings: "表示設定",
     themeSetting: "テーマ",
     languageSetting: "言語",
+    routeManagement: "ルート管理",
+    addRoute: "ルートを追加",
+    routeName: "ルート名",
+    noRoutes: "ルートが登録されていません。",
+    loadingRoutes: "読み込み中...",
+    route: "ルート",
+    none: "未選択",
+    selfRating: "自己評価",
+    notRated: "未評価",
+    routeLoadFailed: "ルート一覧の取得に失敗しました。",
+    all: "すべて",
+    unassigned: "未設定",
+    routeAnalysis: "ルート別分析",
+    selfRatingBreakdown: "自己評価の内訳",
+    logsCount: "件",
   },
   en: {
     dashboard: "Dashboard",
@@ -532,6 +568,21 @@ const translations = {
     displaySettings: "Display Settings",
     themeSetting: "Theme",
     languageSetting: "Language",
+    routeManagement: "Route Management",
+    addRoute: "Add Route",
+    routeName: "Route Name",
+    noRoutes: "No routes registered.",
+    loadingRoutes: "Loading...",
+    route: "Route",
+    none: "None",
+    selfRating: "Self rating",
+    notRated: "Not rated",
+    routeLoadFailed: "Failed to load routes.",
+    all: "All",
+    unassigned: "Unassigned",
+    routeAnalysis: "Route analysis",
+    selfRatingBreakdown: "Self rating breakdown",
+    logsCount: "logs",
   },
 } as const;
 
@@ -566,6 +617,12 @@ const emptyTournament = (): Omit<Tournament, "id"> => ({
 const emptyOfficialTournament = (): Omit<OfficialTournament, "id"> => ({
   name: "",
   date: todayIso(),
+  memo: "",
+});
+
+const emptyRoute = (): RouteFormState => ({
+  discipline: "Cards",
+  name: "",
   memo: "",
 });
 
@@ -653,20 +710,21 @@ export function CoachApp({ view }: { view: View }) {
   const tournamentsState = useTournaments();
   const officialTournamentsState = useOfficialTournaments();
   const opponentsState = useOpponents();
+  const routesState = useRoutes();
   const t = useMemo<Translator>(() => (key) => translations[language][key] ?? translations.ja[key], [language]);
   const trend = useMemo(() => getRecentTrend(practiceLogs.logs), [practiceLogs.logs]);
   const nextOpponent = opponentsState.opponents.find((opponent) => opponent.id === data.settings.nextOpponentId) ?? opponentsState.opponents[0];
 
   const normalizedData = { ...data, logs: practiceLogs.logs, tournaments: tournamentsState.tournaments, officialTournaments: officialTournamentsState.officialTournaments, opponents: opponentsState.opponents };
   const content = {
-    dashboard: <Dashboard data={normalizedData} opponent={nextOpponent} practiceLogs={practiceLogs} tournamentsState={tournamentsState} />,
-    practice: <Practice officialTournaments={officialTournamentsState.officialTournaments} officialTournamentsLoading={officialTournamentsState.loading} practiceLogs={practiceLogs} />,
+    dashboard: <Dashboard data={normalizedData} opponent={nextOpponent} practiceLogs={practiceLogs} tournamentsState={tournamentsState} routesState={routesState} />,
+    practice: <Practice officialTournaments={officialTournamentsState.officialTournaments} officialTournamentsLoading={officialTournamentsState.loading} practiceLogs={practiceLogs} routesState={routesState} />,
     import: <ImportPage officialTournaments={officialTournamentsState.officialTournaments} onSaved={practiceLogs.refresh} />,
-    analytics: <Analytics officialTournaments={officialTournamentsState.officialTournaments} practiceLogs={practiceLogs} />,
+    analytics: <Analytics officialTournaments={officialTournamentsState.officialTournaments} practiceLogs={practiceLogs} routesState={routesState} />,
     opponents: <Opponents opponentsState={opponentsState} />,
     "match-plan": <MatchPlan data={normalizedData} setData={setData} opponentsState={opponentsState} />,
     "weekly-review": <WeeklyReview practiceLogs={practiceLogs} />,
-    settings: <SettingsView data={normalizedData} setData={setData} tournamentsState={tournamentsState} officialTournamentsState={officialTournamentsState} opponentsState={opponentsState} refreshPracticeLogs={practiceLogs.refresh} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} />,
+    settings: <SettingsView data={normalizedData} setData={setData} tournamentsState={tournamentsState} officialTournamentsState={officialTournamentsState} opponentsState={opponentsState} routesState={routesState} refreshPracticeLogs={practiceLogs.refresh} theme={theme} setTheme={setTheme} language={language} setLanguage={setLanguage} />,
   }[view];
 
   return (
@@ -700,7 +758,7 @@ export function CoachApp({ view }: { view: View }) {
   );
 }
 
-function Dashboard({ data, opponent, practiceLogs, tournamentsState }: { data: CoachData; opponent?: Opponent; practiceLogs: ReturnType<typeof usePracticeLogs>; tournamentsState: ReturnType<typeof useTournaments> }) {
+function Dashboard({ data, opponent, practiceLogs, tournamentsState, routesState }: { data: CoachData; opponent?: Opponent; practiceLogs: ReturnType<typeof usePracticeLogs>; tournamentsState: ReturnType<typeof useTournaments>; routesState: ReturnType<typeof useRoutes> }) {
   const t = useT();
   const [notice, setNotice] = useState("");
   const { logs, loading, error } = practiceLogs;
@@ -746,7 +804,7 @@ function Dashboard({ data, opponent, practiceLogs, tournamentsState }: { data: C
           {tournamentsState.loading ? <p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p> : tournamentsState.error ? <p className="text-sm font-semibold text-rose-700 dark:text-rose-200">{tournamentsState.error}</p> : upcomingTournaments.length === 0 ? <p className="text-sm text-zinc-600">{t("noUpcomingTournaments")}</p> : <TournamentList tournaments={upcomingTournaments} nextTournamentId={nextTournament?.id} />}
         </Panel>
       </div>
-      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={data.officialTournaments ?? []} onAdd={addLog} /></Panel>
+      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={data.officialTournaments ?? []} routesState={routesState} onAdd={addLog} /></Panel>
       <div className="grid gap-4 lg:grid-cols-3">
         <Metric label={t("recentTrend")} value={loading ? "--" : `${trend.attempts}回`} detail={loading ? t("recent7Days") : `${trend.successes}成功 / ${t("recent7Days")}`} />
         <Metric label={t("nextOpponent")} value={opponent?.name ?? t("unset")} detail={t("matchPlan")} />
@@ -797,7 +855,7 @@ function TournamentCard({ tournament, isNext }: { tournament: Tournament; isNext
   );
 }
 
-function Practice({ officialTournaments, officialTournamentsLoading, practiceLogs }: { officialTournaments: OfficialTournament[]; officialTournamentsLoading: boolean; practiceLogs: ReturnType<typeof usePracticeLogs> }) {
+function Practice({ officialTournaments, officialTournamentsLoading, practiceLogs, routesState }: { officialTournaments: OfficialTournament[]; officialTournamentsLoading: boolean; practiceLogs: ReturnType<typeof usePracticeLogs>; routesState: ReturnType<typeof useRoutes> }) {
   const t = useT();
   const [notice, setNotice] = useState("");
   const { logs, loading, error } = practiceLogs;
@@ -837,17 +895,19 @@ function Practice({ officialTournaments, officialTournamentsLoading, practiceLog
 
   return (
     <Page title={t("practiceInput")} subtitle="">
-      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={officialTournaments} officialTournamentsLoading={officialTournamentsLoading} onAdd={addLog} /></Panel>
+      <Panel title={t("practiceInput")}><DailyLogForm officialTournaments={officialTournaments} officialTournamentsLoading={officialTournamentsLoading} routesState={routesState} onAdd={addLog} /></Panel>
       {notice && <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">{notice}</p>}
       {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">{error}</p>}
-      {loading ? <Panel title={t("recentRecords")}><p className="text-sm text-zinc-600">読み込み中...</p></Panel> : <EditableLogsTable logs={logs} officialTournaments={officialTournaments} onUpdate={updateLog} onDelete={deleteLog} />}
+      {loading ? <Panel title={t("recentRecords")}><p className="text-sm text-zinc-600">読み込み中...</p></Panel> : <EditableLogsTable logs={logs} officialTournaments={officialTournaments} routesState={routesState} onUpdate={updateLog} onDelete={deleteLog} />}
     </Page>
   );
 }
 
-function DailyLogForm({ officialTournaments, officialTournamentsLoading = false, onAdd }: { officialTournaments: OfficialTournament[]; officialTournamentsLoading?: boolean; onAdd: (log: Omit<PracticeLog, "id">) => boolean | Promise<boolean> }) {
+function DailyLogForm({ officialTournaments, officialTournamentsLoading = false, routesState, onAdd }: { officialTournaments: OfficialTournament[]; officialTournamentsLoading?: boolean; routesState: ReturnType<typeof useRoutes>; onAdd: (log: Omit<PracticeLog, "id">) => boolean | Promise<boolean> }) {
   const t = useT();
   const [form, setForm] = useState<PracticeLogFormState>(emptyLog);
+  const routeSupported = ROUTE_DISCIPLINES.includes(form.discipline as RouteDiscipline);
+  const routeOptions = routesForDiscipline(routesState.routes, form.discipline);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     const ok = await onAdd(normalizeMemoryLeagueLog({ ...form, score: form.score === "" ? undefined : form.score, time: form.time === "" ? undefined : form.time }));
@@ -863,7 +923,7 @@ function DailyLogForm({ officialTournaments, officialTournamentsLoading = false,
         <div>
           <div className="mb-2 text-sm font-medium text-zinc-700">{t("discipline")}</div>
           <div className="flex flex-wrap gap-2">
-            {DISCIPLINES.map((discipline) => <button key={discipline} type="button" title={discipline} onClick={() => setForm({ ...form, discipline })} className={`rounded-md border px-3 py-2 text-sm font-black transition ${form.discipline === discipline ? "ring-2 ring-zinc-950 ring-offset-1" : "hover:bg-zinc-50"}`} style={getDisciplineBadgeStyle(discipline)}><span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: DISCIPLINE_COLORS[discipline] }} />{discipline === "International Names" ? "IN" : discipline}</span></button>)}
+            {DISCIPLINES.map((discipline) => <button key={discipline} type="button" title={discipline} onClick={() => setForm({ ...form, discipline, routeId: routeIdForDiscipline(form.routeId, discipline, routesState.routes) })} className={`rounded-md border px-3 py-2 text-sm font-black transition ${form.discipline === discipline ? "ring-2 ring-zinc-950 ring-offset-1" : "hover:bg-zinc-50"}`} style={getDisciplineBadgeStyle(discipline)}><span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: DISCIPLINE_COLORS[discipline] }} />{discipline === "International Names" ? "IN" : discipline}</span></button>)}
           </div>
         </div>
         <div>
@@ -873,6 +933,24 @@ function DailyLogForm({ officialTournaments, officialTournamentsLoading = false,
           </div>
         </div>
         {form.mode === "train" ? <>{scoreField}{timeField}</> : <>{timeField}{scoreField}</>}
+      </div>
+      <div className="grid gap-4 md:grid-cols-2">
+        {routeSupported && (
+          <Field label={t("route")}>
+            {routesState.loading ? (
+              <div className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300">{t("loadingRoutes")}</div>
+            ) : (
+              <div className="grid gap-1">
+                <select className="input" value={form.routeId ?? ""} onChange={(event) => setForm({ ...form, routeId: event.target.value || null })}>
+                  <option value="">{t("none")}</option>
+                  {routeOptions.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}
+                </select>
+                {routesState.error && <span className="text-xs font-semibold text-rose-700 dark:text-rose-300">{t("routeLoadFailed")}</span>}
+              </div>
+            )}
+          </Field>
+        )}
+        <div><div className="mb-1 text-sm font-medium text-zinc-700 dark:text-zinc-300">{t("selfRating")}</div><SelfRatingButtons value={form.selfRating ?? null} onChange={(selfRating) => setForm({ ...form, selfRating })} /></div>
       </div>
       {form.mode === "official" && (
         <div className="grid gap-4 md:grid-cols-3">
@@ -1105,7 +1183,7 @@ function ImportPage({ officialTournaments, onSaved }: { officialTournaments: Off
   );
 }
 
-function Analytics({ officialTournaments, practiceLogs }: { officialTournaments: OfficialTournament[]; practiceLogs: ReturnType<typeof usePracticeLogs> }) {
+function Analytics({ officialTournaments, practiceLogs, routesState }: { officialTournaments: OfficialTournament[]; practiceLogs: ReturnType<typeof usePracticeLogs>; routesState: ReturnType<typeof useRoutes> }) {
   const t = useT();
   const { logs, loading, error } = practiceLogs;
   const [modeFilter, setModeFilter] = useState<LogMode | "all">("all");
@@ -1114,22 +1192,45 @@ function Analytics({ officialTournaments, practiceLogs }: { officialTournaments:
   const [period, setPeriod] = useState<PeriodFilter>("all");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [routeFilter, setRouteFilter] = useState<AnalyticsRouteFilter>("all");
+  const [selfRatingFilter, setSelfRatingFilter] = useState<AnalyticsSelfRatingFilter>("all");
+  const [ratingUpdateId, setRatingUpdateId] = useState<string | null>(null);
+  const [ratingError, setRatingError] = useState("");
 
   const months = useMemo(() => getAvailableMonths(logs), [logs]);
-  const filteredLogs = useMemo(() => {
+  const baseFilteredLogs = useMemo(() => {
     const base = getAnalyticsFilterState({ logs, mode: modeFilter, discipline: selectedEvent, period, customFrom, customTo });
     return modeFilter === "official" ? filterLogsByOfficialTournament(base, officialTournamentFilter) : base;
   }, [customFrom, customTo, logs, modeFilter, officialTournamentFilter, period, selectedEvent]);
+  const routeFilteredLogs = useMemo(() => filterLogsByRoute(baseFilteredLogs, routeFilter), [baseFilteredLogs, routeFilter]);
+  const filteredLogs = useMemo(() => filterLogsBySelfRating(routeFilteredLogs, selfRatingFilter), [routeFilteredLogs, selfRatingFilter]);
+  const selfRatingBreakdown = useMemo(() => getSelfRatingBreakdown(routeFilteredLogs), [routeFilteredLogs]);
+  const routeAnalysisLogs = useMemo(() => filterLogsBySelfRating(baseFilteredLogs, selfRatingFilter), [baseFilteredLogs, selfRatingFilter]);
+  const routeAnalysis = useMemo(() => getRouteAnalysis(routeAnalysisLogs, routesState.routes), [routeAnalysisLogs, routesState.routes]);
+  const routeFilterVisible = selectedEvent !== "all" && ROUTE_DISCIPLINES.includes(selectedEvent as RouteDiscipline);
+  const routeOptions = routeFilterVisible ? routesForDiscipline(routesState.routes, selectedEvent) : [];
   const eventCards = useMemo(() => DISCIPLINES.map((discipline) => calculateEventStats(discipline, filteredLogs)), [filteredLogs]);
   const selectedStats = selectedEvent === "all" ? undefined : calculateEventStats(selectedEvent, filteredLogs);
   const selectedWindowStats = selectedEvent === "all" ? [] : getDisciplineWindowStats(filteredLogs).filter((item) => item.discipline === selectedEvent);
+  const updateAnalyticsSelfRating = async (log: PracticeLog, selfRating: SelfRating | null) => {
+    setRatingError("");
+    setRatingUpdateId(log.id);
+    try {
+      await practiceLogs.updateSelfRating(log.id, selfRating);
+    } catch (updateError) {
+      setRatingError(updateError instanceof Error ? updateError.message : "自己評価の更新に失敗しました。");
+    } finally {
+      setRatingUpdateId(null);
+    }
+  };
 
   return (
     <Page title={t("analytics")} subtitle="">
       {loading && <Panel title={t("analytics")}><p className="text-sm text-zinc-600 dark:text-zinc-300">読み込み中...</p></Panel>}
       {error && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{error}</p>}
+      {ratingError && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{ratingError}</p>}
       <Panel title={t("filters")}>
-        <FilterButtons label={t("discipline")} items={[{ value: "all", label: t("allDisciplines") }, ...DISCIPLINES.map((discipline) => ({ value: discipline, label: discipline }))]} value={selectedEvent} onChange={(value) => setSelectedEvent(value as EventFilter)} />
+        <FilterButtons label={t("discipline")} items={[{ value: "all", label: t("allDisciplines") }, ...DISCIPLINES.map((discipline) => ({ value: discipline, label: discipline }))]} value={selectedEvent} onChange={(value) => { setSelectedEvent(value as EventFilter); setRouteFilter("all"); }} />
         <FilterButtons label={t("period")} items={[{ value: "all", label: t("allPeriod") }, { value: "7", label: "7日" }, { value: "30", label: "30日" }, { value: "90", label: "90日" }, ...months.map((month) => ({ value: `month:${month}`, label: formatMonth(month) })), { value: "custom", label: t("custom") }]} value={period} onChange={(value) => setPeriod(value as PeriodFilter)} />
         {period === "custom" && <div className="mt-3 grid gap-3 sm:grid-cols-2"><Field label={t("startDate")}><input className="input" type="date" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></Field><Field label={t("endDate")}><input className="input" type="date" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></Field></div>}
         <FilterButtons label={t("mode")} items={[{ value: "all", label: "All" }, ...LOG_MODES.map((mode) => ({ value: mode, label: getModeLabel(mode) }))]} value={modeFilter} onChange={(value) => setModeFilter(value as LogMode | "all")} />
@@ -1141,13 +1242,40 @@ function Analytics({ officialTournaments, practiceLogs }: { officialTournaments:
             onChange={(value) => setOfficialTournamentFilter(value)}
           />
         )}
+        {routeFilterVisible && (
+          <div className="mt-4 max-w-md">
+            <Field label={t("route")}>
+              <select className="input" disabled={routesState.loading || Boolean(routesState.error)} value={routeFilter} onChange={(event) => setRouteFilter(event.target.value)}>
+                <option value="all">{t("all")}</option>
+                <option value="unassigned">{t("unassigned")}</option>
+                {routeOptions.map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}
+              </select>
+              {routesState.loading && <span className="text-xs text-zinc-500 dark:text-zinc-400">{t("loadingRoutes")}</span>}
+              {routesState.error && <span className="text-xs font-semibold text-rose-700 dark:text-rose-300">{t("routeLoadFailed")}</span>}
+            </Field>
+          </div>
+        )}
+        <FilterButtons label={t("selfRating")} items={[{ value: "all", label: t("all") }, { value: "unrated", label: t("notRated") }, { value: "good", label: "○" }, { value: "neutral", label: "▲" }, { value: "bad", label: "×" }]} value={selfRatingFilter} onChange={(value) => setSelfRatingFilter(value as AnalyticsSelfRatingFilter)} />
       </Panel>
+      {!loading && !error && (
+        <Panel title={t("selfRatingBreakdown")}>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {(["good", "neutral", "bad"] as const).map((rating) => <div key={rating} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-center dark:border-zinc-700 dark:bg-zinc-900"><div className="text-2xl font-black">{SELF_RATING_SYMBOLS[rating]}</div><div className="mt-1 text-lg font-bold">{selfRatingBreakdown[rating]}</div></div>)}
+            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-center dark:border-zinc-700 dark:bg-zinc-900"><div className="text-sm font-bold">{t("notRated")}</div><div className="mt-1 text-lg font-bold">{selfRatingBreakdown.unrated}</div></div>
+          </div>
+        </Panel>
+      )}
+      {!loading && !error && routeFilterVisible && !routesState.loading && !routesState.error && (
+        <Panel title={t("routeAnalysis")}>
+          {routeAnalysis.length === 0 ? <p className="text-sm text-zinc-600 dark:text-zinc-300">{t("noLogsInPeriod")}</p> : <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">{routeAnalysis.map((item) => <article key={item.routeId ?? "unassigned"} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-700 dark:bg-zinc-900"><div className="font-black">{item.routeName ?? t("unassigned")}</div><div className="mt-3 grid grid-cols-3 gap-2 text-sm"><MiniMetric label={t("logsCount")} value={String(item.count)} /><MiniMetric label={t("averageScore")} value={record(item.averageScore)} /><MiniMetric label={t("averageTime")} value={`${formatTime(item.averageTime)}s`} /></div><div className="mt-3 text-sm font-semibold">○ {item.selfRatings.good} / ▲ {item.selfRatings.neutral} / × {item.selfRatings.bad}</div></article>)}</div>}
+        </Panel>
+      )}
       {!loading && !error && filteredLogs.length === 0 ? (
         <Panel title={t("analytics")}><p className="text-sm text-zinc-600">{t("noLogsInPeriod")}</p></Panel>
       ) : !loading && !error && selectedEvent === "all" ? (
         <>
           <Panel title={t("eventAnalysis")}><EventStatsGrid stats={eventCards} /></Panel>
-          <Panel title={t("allLogs")}><LogList logs={filteredLogs} officialTournaments={officialTournaments} /></Panel>
+          <Panel title={t("allLogs")}><LogList logs={filteredLogs} officialTournaments={officialTournaments} onSelfRatingChange={updateAnalyticsSelfRating} selfRatingUpdatingId={ratingUpdateId} /></Panel>
         </>
       ) : !loading && !error ? (
         <>
@@ -1155,7 +1283,7 @@ function Analytics({ officialTournaments, practiceLogs }: { officialTournaments:
             <EventStatsGrid stats={selectedStats ? [selectedStats] : []} />
             <div className="mt-4"><DisciplineWindowGrid data={selectedWindowStats} /></div>
           </Panel>
-          <Panel title={`${selectedEvent} ${t("logList")}`}><LogList logs={filteredLogs} officialTournaments={officialTournaments} /></Panel>
+          <Panel title={`${selectedEvent} ${t("logList")}`}><LogList logs={filteredLogs} officialTournaments={officialTournaments} onSelfRatingChange={updateAnalyticsSelfRating} selfRatingUpdatingId={ratingUpdateId} /></Panel>
         </>
       ) : null}
     </Page>
@@ -1279,6 +1407,7 @@ function SettingsView({
   tournamentsState,
   officialTournamentsState,
   opponentsState,
+  routesState,
   refreshPracticeLogs,
   theme,
   setTheme,
@@ -1290,6 +1419,7 @@ function SettingsView({
   tournamentsState: ReturnType<typeof useTournaments>;
   officialTournamentsState: ReturnType<typeof useOfficialTournaments>;
   opponentsState: ReturnType<typeof useOpponents>;
+  routesState: ReturnType<typeof useRoutes>;
   refreshPracticeLogs: () => Promise<void>;
   theme: ThemeMode;
   setTheme: React.Dispatch<React.SetStateAction<ThemeMode>>;
@@ -1305,6 +1435,49 @@ function SettingsView({
   const [editingOfficialTournamentId, setEditingOfficialTournamentId] = useState<string | undefined>();
   const [officialForm, setOfficialForm] = useState(emptyOfficialTournament);
   const [settingsError, setSettingsError] = useState("");
+  const [routeFormVisible, setRouteFormVisible] = useState(false);
+  const [editingRouteId, setEditingRouteId] = useState<string | undefined>();
+  const [routeForm, setRouteForm] = useState<RouteFormState>(emptyRoute);
+  const [routeSaving, setRouteSaving] = useState(false);
+  const sortedRoutes = sortRoutesForSettings(routesState.routes);
+  const resetRouteForm = () => {
+    setEditingRouteId(undefined);
+    setRouteForm(emptyRoute());
+    setRouteFormVisible(false);
+  };
+  const submitRoute = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!routeForm.name.trim()) return;
+    setSettingsError("");
+    setRouteSaving(true);
+    try {
+      const payload = { ...routeForm, name: routeForm.name.trim(), memo: routeForm.memo?.trim() || null };
+      if (editingRouteId) await routesState.updateRoute(editingRouteId, payload);
+      else await routesState.createRoute(payload);
+      resetRouteForm();
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "ルートの保存に失敗しました。");
+    } finally {
+      setRouteSaving(false);
+    }
+  };
+  const startRouteEdit = (route: Route) => {
+    if (!ROUTE_DISCIPLINES.includes(route.discipline as RouteDiscipline)) return;
+    setSettingsError("");
+    setEditingRouteId(route.id);
+    setRouteForm({ discipline: route.discipline as RouteDiscipline, name: route.name, memo: route.memo ?? "" });
+    setRouteFormVisible(true);
+  };
+  const removeRoute = async (route: Route) => {
+    if (!window.confirm(`「${route.name}」を削除しますか？`)) return;
+    setSettingsError("");
+    try {
+      await routesState.deleteRoute(route.id);
+      if (editingRouteId === route.id) resetRouteForm();
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : "ルートの削除に失敗しました。");
+    }
+  };
   const submitTournament = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!form.name.trim() || !form.date) return;
@@ -1366,7 +1539,7 @@ function SettingsView({
   };
   return (
     <Page title={t("settings")} subtitle="">
-      {(settingsError || tournamentsState.error || officialTournamentsState.error) && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{settingsError || tournamentsState.error || officialTournamentsState.error}</p>}
+      {(settingsError || routesState.error || tournamentsState.error || officialTournamentsState.error) && <p className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-200">{settingsError || routesState.error || tournamentsState.error || officialTournamentsState.error}</p>}
       <Panel title={t("displaySettings")}>
         <div className="grid gap-4 md:grid-cols-2">
           <div>
@@ -1390,6 +1563,57 @@ function SettingsView({
             </div>
           </div>
         </div>
+      </Panel>
+      <Panel title={t("routeManagement")}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">Cards / Numbers / Images / Words</p>
+          <button type="button" onClick={() => { setSettingsError(""); setEditingRouteId(undefined); setRouteForm(emptyRoute()); setRouteFormVisible(true); }} className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800">
+            {t("addRoute")}
+          </button>
+        </div>
+        {routeFormVisible && (
+          <form onSubmit={submitRoute} className="mt-4 grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-2">
+            <Field label={t("discipline")}>
+              <select className="input" value={routeForm.discipline} onChange={(event) => setRouteForm({ ...routeForm, discipline: event.target.value as RouteDiscipline })}>
+                {ROUTE_DISCIPLINES.map((discipline) => <option key={discipline} value={discipline}>{discipline}</option>)}
+              </select>
+            </Field>
+            <Field label={t("routeName")}><input className="input" required value={routeForm.name} onChange={(event) => setRouteForm({ ...routeForm, name: event.target.value })} /></Field>
+            <Field label={t("memo")} className="md:col-span-2"><textarea className="input min-h-20 resize-y" value={routeForm.memo ?? ""} onChange={(event) => setRouteForm({ ...routeForm, memo: event.target.value })} /></Field>
+            <div className="flex flex-col gap-2 md:col-span-2 sm:flex-row">
+              <button disabled={routeSaving} className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{routeSaving ? "保存中..." : editingRouteId ? t("save") : t("addRoute")}</button>
+              <button type="button" disabled={routeSaving} onClick={resetRouteForm} className="h-11 rounded-md border border-zinc-300 px-4 font-semibold hover:bg-white disabled:opacity-60">{t("cancel")}</button>
+            </div>
+          </form>
+        )}
+        {routesState.loading ? <p className="mt-4 text-sm text-zinc-600 dark:text-zinc-300">{t("loadingRoutes")}</p> : (
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            {ROUTE_DISCIPLINES.map((discipline) => {
+              const disciplineRoutes = sortedRoutes.filter((route) => route.discipline === discipline);
+              return (
+                <section key={discipline} className="min-w-0">
+                  <h3 className="border-b border-zinc-200 pb-2 text-base font-black">{discipline}</h3>
+                  {disciplineRoutes.length === 0 ? <p className="py-3 text-sm text-zinc-500">{t("noRoutes")}</p> : (
+                    <div className="divide-y divide-zinc-200">
+                      {disciplineRoutes.map((route) => (
+                        <article key={route.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <div className="break-words font-bold">{route.name}</div>
+                            {route.memo && <p className="mt-1 whitespace-pre-wrap break-words text-sm text-zinc-600 dark:text-zinc-300">{route.memo}</p>}
+                          </div>
+                          <div className="flex shrink-0 gap-2">
+                            <button type="button" onClick={() => startRouteEdit(route)} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-semibold hover:bg-zinc-50">{t("edit")}</button>
+                            <button type="button" onClick={() => void removeRoute(route)} className="rounded-md border border-rose-300 px-3 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50">{t("delete")}</button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+          </div>
+        )}
       </Panel>
       <Panel title={editingOfficialTournamentId ? t("officialTournamentEdit") : t("officialTournamentRecords")}>
         <form onSubmit={submitOfficialTournament} className="grid gap-4 md:grid-cols-3">
@@ -1427,13 +1651,13 @@ function SettingsView({
   );
 }
 
-function EditableLogsTable({ logs, officialTournaments, onUpdate, onDelete }: { logs: PracticeLog[]; officialTournaments: OfficialTournament[]; onUpdate: (log: PracticeLog) => Promise<boolean>; onDelete: (id: string) => Promise<boolean> }) {
+function EditableLogsTable({ logs, officialTournaments, routesState, onUpdate, onDelete }: { logs: PracticeLog[]; officialTournaments: OfficialTournament[]; routesState: ReturnType<typeof useRoutes>; onUpdate: (log: PracticeLog) => Promise<boolean>; onDelete: (id: string) => Promise<boolean> }) {
   const t = useT();
   const [editingId, setEditingId] = useState<string | undefined>();
   const [draft, setDraft] = useState<PracticeLogFormState>(emptyLog);
   const startEdit = (log: PracticeLog) => {
     setEditingId(log.id);
-    setDraft({ date: log.date, discipline: log.discipline, mode: log.mode ?? "train", officialTournamentId: log.officialTournamentId, officialRound: log.officialRound, opponentName: log.opponentName, score: log.score ?? "", time: log.time ?? "", memo: log.memo });
+    setDraft({ date: log.date, discipline: log.discipline, mode: log.mode ?? "train", officialTournamentId: log.officialTournamentId, officialRound: log.officialRound, opponentName: log.opponentName, score: log.score ?? "", time: log.time ?? "", memo: log.memo, routeId: log.routeId ?? null, selfRating: log.selfRating ?? null });
   };
   const save = async (id: string) => {
     const normalized = normalizeMemoryLeagueLog({ ...draft, score: draft.score === "" ? undefined : draft.score, time: draft.time === "" ? undefined : draft.time });
@@ -1445,18 +1669,19 @@ function EditableLogsTable({ logs, officialTournaments, onUpdate, onDelete }: { 
   };
   return (
     <Panel title={t("recentRecords")}>
-      <LogTable logs={logs} officialTournaments={officialTournaments} editingId={editingId} draft={draft} onDraftChange={setDraft} onEdit={startEdit} onSave={save} onCancel={() => setEditingId(undefined)} onDelete={confirmDelete} />
+      <LogTable logs={logs} officialTournaments={officialTournaments} routesState={routesState} editingId={editingId} draft={draft} onDraftChange={setDraft} onEdit={startEdit} onSave={save} onCancel={() => setEditingId(undefined)} onDelete={confirmDelete} />
     </Panel>
   );
 }
 
-function LogList({ logs, officialTournaments = [] }: { logs: PracticeLog[]; officialTournaments?: OfficialTournament[] }) {
-  return <LogTable logs={logs} officialTournaments={officialTournaments} />;
+function LogList({ logs, officialTournaments = [], onSelfRatingChange, selfRatingUpdatingId }: { logs: PracticeLog[]; officialTournaments?: OfficialTournament[]; onSelfRatingChange?: (log: PracticeLog, selfRating: SelfRating | null) => void | Promise<void>; selfRatingUpdatingId?: string | null }) {
+  return <LogTable logs={logs} officialTournaments={officialTournaments} onSelfRatingChange={onSelfRatingChange} selfRatingUpdatingId={selfRatingUpdatingId} />;
 }
 
 function LogTable({
   logs,
   officialTournaments,
+  routesState,
   editingId,
   draft,
   onDraftChange,
@@ -1464,9 +1689,12 @@ function LogTable({
   onSave,
   onCancel,
   onDelete,
+  onSelfRatingChange,
+  selfRatingUpdatingId,
 }: {
   logs: PracticeLog[];
   officialTournaments: OfficialTournament[];
+  routesState?: ReturnType<typeof useRoutes>;
   editingId?: string;
   draft?: PracticeLogFormState;
   onDraftChange?: (draft: PracticeLogFormState) => void;
@@ -1474,6 +1702,8 @@ function LogTable({
   onSave?: (id: string) => void | Promise<void>;
   onCancel?: () => void;
   onDelete?: (id: string) => void | Promise<void>;
+  onSelfRatingChange?: (log: PracticeLog, selfRating: SelfRating | null) => void | Promise<void>;
+  selfRatingUpdatingId?: string | null;
 }) {
   const t = useT();
   const canEdit = Boolean(onEdit && onSave && onCancel && onDelete);
@@ -1481,20 +1711,23 @@ function LogTable({
   const editInputClass = "h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 text-sm outline-none focus:border-zinc-950";
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200">
-      <table className="min-w-[1120px] table-fixed divide-y divide-zinc-200 text-left">
+      <table className="w-full min-w-[1120px] table-fixed divide-y divide-zinc-200 text-left">
         <colgroup>
-          <col className="w-32" />
-          <col className="w-44" />
-          <col className="w-64" />
           <col className="w-24" />
-          <col className="w-24" />
-          <col className="w-20" />
-          <col className={canEdit ? "w-56" : "w-72"} />
           <col className="w-32" />
+          <col className="w-40" />
+          <col className="w-16" />
+          <col className="w-16" />
+          <col className="w-16" />
+          <col className="w-28" />
+          <col className="w-28" />
+          <col />
+          <col className="w-36" />
         </colgroup>
         <thead className="bg-zinc-50 text-xs font-bold text-zinc-500">
           <tr>
-            {[t("date"), t("discipline"), "Mode", "Score", "Time", t("judgment"), t("memo"), t("actions")].map((header) => <th key={header} className="px-3 py-2">{header}</th>)}
+            {[t("date"), t("discipline"), "Mode", "Score", "Time", t("judgment"), t("route"), t("selfRating"), t("memo")].map((header) => <th key={header} className="px-3 py-2">{header}</th>)}
+            <th className="sticky right-0 z-10 bg-zinc-50 px-3 py-2 shadow-[-1px_0_0_#e4e4e7]">{t("actions")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100 bg-white">
@@ -1533,14 +1766,27 @@ function LogTable({
                   {isEditing ? <input className={editInputClass} type="number" min="0" step="0.01" value={draft.time} onChange={(event) => onDraftChange({ ...draft, time: event.target.value === "" ? "" : Number(event.target.value) })} aria-label="Time" /> : `${formatTime(log.time ?? 0)}s`}
                 </td>
                 <td className={`${cellClass} font-semibold`}>{isSuccessfulLog(isEditing ? { ...log, score: draft.score === "" ? 0 : draft.score } : log) ? "○" : "×"}</td>
-                <td className="px-3 py-3 align-middle text-sm">
-                  {isEditing ? (
-                    <input className={`${editInputClass} min-w-56`} value={draft.memo} onChange={(event) => onDraftChange({ ...draft, memo: event.target.value })} aria-label={t("memo")} />
-                  ) : (
-                    <span className="block truncate text-zinc-700" title={log.memo || "-"}>{log.memo || "-"}</span>
-                  )}
+                <td className={cellClass}>
+                  {isEditing && ROUTE_DISCIPLINES.includes(draft.discipline as RouteDiscipline) ? (
+                    routesState?.loading ? <span className="text-xs text-zinc-500">{t("loadingRoutes")}</span> : (
+                      <select className={editInputClass} value={draft.routeId ?? ""} onChange={(event) => onDraftChange({ ...draft, routeId: event.target.value || null })} aria-label={t("route")}>
+                        <option value="">{t("none")}</option>
+                        {routesForDiscipline(routesState?.routes ?? [], draft.discipline).map((route) => <option key={route.id} value={route.id}>{route.name}</option>)}
+                      </select>
+                    )
+                  ) : log.route?.name ? <span className="block truncate" title={log.route.name}>{log.route.name}</span> : "-"}
                 </td>
                 <td className={cellClass}>
+                  {isEditing ? <SelfRatingButtons value={draft.selfRating ?? null} onChange={(selfRating) => onDraftChange({ ...draft, selfRating })} compact /> : onSelfRatingChange ? <div className={selfRatingUpdatingId === log.id ? "pointer-events-none opacity-50" : ""}><SelfRatingButtons value={log.selfRating ?? null} onChange={(selfRating) => void onSelfRatingChange(log, selfRating)} compact /></div> : <SelfRatingDisplay value={log.selfRating ?? null} />}
+                </td>
+                <td className="min-w-0 px-3 py-3 align-middle text-sm">
+                  {isEditing ? (
+                    <textarea className={`${editInputClass} min-h-16 resize-y whitespace-pre-wrap py-2`} value={draft.memo} onChange={(event) => onDraftChange({ ...draft, memo: event.target.value })} aria-label={t("memo")} rows={2} />
+                  ) : (
+                    <div className="max-w-full overflow-x-auto whitespace-nowrap pb-1 text-zinc-700 dark:text-zinc-200" tabIndex={log.memo ? 0 : undefined} aria-label={log.memo ? t("memo") : undefined}>{log.memo || "-"}</div>
+                  )}
+                </td>
+                <td className={`${cellClass} sticky right-0 z-[1] bg-white shadow-[-1px_0_0_#e4e4e7] dark:bg-zinc-900`}>
                   {isEditing ? (
                     <div className="flex gap-2"><button onClick={() => onSave(log.id)} className="rounded-md bg-zinc-950 px-3 py-1.5 text-sm font-semibold text-white">{t("save")}</button><button onClick={onCancel} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-semibold hover:bg-white">{t("cancel")}</button></div>
                   ) : canEdit ? (
@@ -1642,6 +1888,40 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 
 function Field({ label, children, className = "" }: { label: string; children: React.ReactNode; className?: string }) {
   return <label className={`grid gap-1 text-sm font-medium text-zinc-700 ${className}`}>{label}{children}</label>;
+}
+
+function SelfRatingButtons({ value, onChange, compact = false }: { value: SelfRating | null; onChange: (value: SelfRating | null) => void; compact?: boolean }) {
+  const t = useT();
+  const styles: Record<SelfRating, string> = {
+    good: "border-emerald-300 text-emerald-800 dark:border-emerald-700 dark:text-emerald-200",
+    neutral: "border-amber-300 text-amber-800 dark:border-amber-700 dark:text-amber-200",
+    bad: "border-rose-300 text-rose-800 dark:border-rose-700 dark:text-rose-200",
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2" role="group" aria-label={t("selfRating")}>
+      {SELF_RATINGS.map((rating) => (
+        <button
+          key={rating}
+          type="button"
+          aria-pressed={value === rating}
+          aria-label={`${t("selfRating")}: ${SELF_RATING_SYMBOLS[rating]} ${rating}`}
+          title={`${SELF_RATING_SYMBOLS[rating]} ${rating}`}
+          onClick={() => onChange(value === rating ? null : rating)}
+          className={`${compact ? "h-8 min-w-8 px-2 text-base" : "h-11 min-w-12 px-3 text-xl"} rounded-md border bg-white font-black transition dark:bg-zinc-900 ${styles[rating]} ${value === rating ? "ring-2 ring-zinc-950 ring-offset-1 dark:ring-white dark:ring-offset-zinc-900" : "opacity-70 hover:opacity-100"}`}
+        >
+          {SELF_RATING_SYMBOLS[rating]}
+        </button>
+      ))}
+      {!compact && <span className="text-xs text-zinc-500 dark:text-zinc-400">{value ? `${SELF_RATING_SYMBOLS[value]} ${value}` : t("notRated")}</span>}
+    </div>
+  );
+}
+
+function SelfRatingDisplay({ value }: { value: SelfRating | null }) {
+  const t = useT();
+  if (!value) return <span className="text-xs text-zinc-400">{t("notRated")}</span>;
+  const color = value === "good" ? "text-emerald-700 dark:text-emerald-300" : value === "neutral" ? "text-amber-700 dark:text-amber-300" : "text-rose-700 dark:text-rose-300";
+  return <span className={`text-lg font-black ${color}`} title={value}>{SELF_RATING_SYMBOLS[value]}</span>;
 }
 
 function NumberField({ label, value, onChange, placeholder, step = "1" }: { label: string; value: number | ""; onChange: (value: number | "") => void; placeholder?: string; step?: string }) {

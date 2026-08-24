@@ -32,6 +32,24 @@ export type MatchResult = "win" | "loss";
 
 export type LogSource = "manual" | "import" | "extension";
 
+export type SelfRating = "good" | "neutral" | "bad";
+
+export const SELF_RATINGS = ["good", "neutral", "bad"] as const satisfies readonly SelfRating[];
+export const SELF_RATING_SYMBOLS: Record<SelfRating, "○" | "▲" | "×"> = {
+  good: "○",
+  neutral: "▲",
+  bad: "×",
+};
+
+export type Route = {
+  id: string;
+  name: string;
+  discipline: Discipline;
+  memo?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type PracticeLog = {
   id: string;
   date: string;
@@ -42,6 +60,9 @@ export type PracticeLog = {
   opponentName?: string;
   result?: MatchResult;
   source?: LogSource;
+  routeId?: string | null;
+  selfRating?: SelfRating | null;
+  route?: Route | null;
   score?: number;
   time?: number;
   attempts: number;

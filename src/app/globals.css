@@ -31,6 +31,14 @@ textarea {
   font: inherit;
 }
 
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
 .input {
   min-height: 2.75rem;
   width: 100%;

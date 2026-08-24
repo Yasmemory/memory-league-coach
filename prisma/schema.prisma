@@ -32,6 +32,25 @@ enum LogSource {
   extension
 }
 
+enum SelfRating {
+  good
+  neutral
+  bad
+}
+
+model Route {
+  id           String        @id @default(cuid())
+  name         String
+  discipline   Discipline
+  memo         String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  practiceLogs PracticeLog[]
+
+  @@index([discipline])
+  @@unique([discipline, name])
+}
+
 model PracticeLog {
   id                   String              @id @default(cuid())
   date                 DateTime            @db.Date
@@ -47,14 +66,18 @@ model PracticeLog {
   source               LogSource           @default(manual)
   extensionFingerprint String?             @unique
   externalId            String?
+  routeId               String?
+  selfRating            SelfRating?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
   officialTournament   OfficialTournament? @relation(fields: [officialTournamentId], references: [id], onDelete: SetNull)
+  route                Route?              @relation(fields: [routeId], references: [id], onDelete: SetNull)
 
   @@index([date])
   @@index([discipline])
   @@index([mode])
   @@index([officialTournamentId])
+  @@index([routeId])
 }
 
 model Tournament {

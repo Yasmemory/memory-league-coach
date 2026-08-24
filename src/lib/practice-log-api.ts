@@ -1,10 +1,14 @@
-import type { Discipline, LogMode, LogSource, MatchResult, PracticeLog, Prisma } from "@prisma/client";
+import type { Discipline, LogMode, LogSource, MatchResult, PracticeLog, Prisma, Route, SelfRating } from "@prisma/client";
+import type { Route as RouteResponse } from "@/lib/types";
 
 export type PracticeLogResponse = Omit<PracticeLog, "discipline" | "source" | "date"> & {
   date: string;
   discipline: "Cards" | "Images" | "International Names" | "Names" | "Numbers" | "Words";
   source: "manual" | "import" | "extension";
   externalId?: string | null;
+  routeId?: string | null;
+  selfRating?: "good" | "neutral" | "bad" | null;
+  route?: RouteResponse | null;
   officialTournament?: {
     id: string;
     name: string;
@@ -31,6 +35,8 @@ export type PracticeLogRequest = {
   officialRound: string | null;
   memo: string | null;
   source: "manual" | "import" | "extension";
+  routeId?: string | null;
+  selfRating?: "good" | "neutral" | "bad" | null;
 };
 
 export type PracticeLogWithTournament = PracticeLog & {
@@ -42,6 +48,7 @@ export type PracticeLogWithTournament = PracticeLog & {
     createdAt: Date;
     updatedAt: Date;
   } | null;
+  route?: Route | null;
 };
 
 const disciplineMap: Record<string, Discipline> = {
@@ -55,6 +62,7 @@ const disciplineMap: Record<string, Discipline> = {
 
 const modeValues = new Set<LogMode>(["train", "rated", "official"]);
 const resultValues = new Set<MatchResult>(["win", "loss"]);
+const selfRatingValues = new Set<SelfRating>(["good", "neutral", "bad"]);
 const sourceMap: Record<string, LogSource> = {
   manual: "manual",
   import: "imported",
@@ -75,6 +83,14 @@ export function toPracticeLogResponse(log: PracticeLogWithTournament): PracticeL
       ? {
           ...log.officialTournament,
           date: dateOnly(log.officialTournament.date),
+        }
+      : null,
+    route: log.route
+      ? {
+          ...log.route,
+          discipline: log.route.discipline === "InternationalNames" ? "International Names" : log.route.discipline,
+          createdAt: log.route.createdAt.toISOString(),
+          updatedAt: log.route.updatedAt.toISOString(),
         }
       : null,
   };
@@ -110,6 +126,16 @@ export async function createPracticeLogInApi(payload: PracticeLogRequest, fallba
     throw new Error(await readPracticeLogApiError(response, fallback));
   }
 
+  return (await response.json()) as PracticeLogResponse;
+}
+
+export async function updatePracticeLogSelfRatingInApi(id: string, selfRating: "good" | "neutral" | "bad" | null) {
+  const response = await fetch(`/api/practice-logs/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ selfRating }),
+  });
+  if (!response.ok) throw new Error(await readPracticeLogApiError(response, "Failed to update self rating."));
   return (await response.json()) as PracticeLogResponse;
 }
 
@@ -179,6 +205,16 @@ export function parsePracticeLogBody(body: unknown): { data: Prisma.PracticeLogU
   const externalId = parseNullableString(body.externalId);
   if (externalId === undefined) return { error: "externalId must be a string or null." };
 
+  const routeId = parseNullableString(body.routeId);
+  if (routeId === undefined) return { error: "routeId must be a string or null." };
+
+  const selfRating = body.selfRating === null || body.selfRating === undefined
+    ? null
+    : typeof body.selfRating === "string" && selfRatingValues.has(body.selfRating as SelfRating)
+      ? (body.selfRating as SelfRating)
+      : undefined;
+  if (selfRating === undefined) return { error: "selfRating must be good, neutral, bad, or null." };
+
   return {
     data: {
       date,
@@ -193,8 +229,21 @@ export function parsePracticeLogBody(body: unknown): { data: Prisma.PracticeLogU
       memo,
       source,
       externalId,
+      routeId,
+      selfRating,
     },
   };
+}
+
+export function parsePracticeLogSelfRatingPatch(body: unknown): { data: { selfRating: SelfRating | null } } | { error: string } | null {
+  if (!isObject(body) || !("selfRating" in body) || Object.keys(body).some((key) => key !== "selfRating")) return null;
+  const selfRating = body.selfRating === null
+    ? null
+    : typeof body.selfRating === "string" && selfRatingValues.has(body.selfRating as SelfRating)
+      ? (body.selfRating as SelfRating)
+      : undefined;
+  if (selfRating === undefined) return { error: "selfRating must be good, neutral, bad, or null." };
+  return { data: { selfRating } };
 }
 
 export function createExtensionFingerprint(data: Prisma.PracticeLogUncheckedCreateInput) {
@@ -227,5 +276,7 @@ export function toPracticeLogUpdateInput(data: Prisma.PracticeLogUncheckedCreate
     memo: data.memo,
     source: data.source,
     externalId: data.externalId,
+    routeId: data.routeId,
+    selfRating: data.selfRating,
   };
 }
