@@ -17,8 +17,20 @@ test("Practice log edit memo stays inside its column and can wrap", () => {
 
 test("Practice log actions use a fixed sticky right column", () => {
   assert.match(coachAppSource, /<col className="w-36" \/>/);
-  assert.match(coachAppSource, /sticky right-0 z-10 bg-zinc-50/);
-  assert.match(coachAppSource, /sticky right-0 z-\[1\] bg-white/);
+  assert.match(coachAppSource, /sticky right-0 z-10 bg-zinc-50[^\n]*dark:bg-zinc-900/);
+  assert.match(coachAppSource, /sticky right-0 z-\[1\] bg-white text-zinc-900[^\n]*dark:bg-zinc-900 dark:text-zinc-100/);
+});
+
+test("Practice memo has explicit readable light and dark text colors", () => {
+  assert.match(coachAppSource, /overflow-x-auto whitespace-nowrap[^\n]*text-zinc-800 dark:text-zinc-200/);
+});
+
+test("Analytics self-rating cards separate light and dark colors", () => {
+  assert.match(coachAppSource, /border-zinc-200 bg-white[^\n]*text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100/);
+});
+
+test("Tailwind dark variants follow the app theme class instead of the OS theme", () => {
+  assert.match(globalCssSource, /@custom-variant dark \(&:where\(\.dark, \.dark \*\)\);/);
 });
 
 test("enabled and disabled buttons expose appropriate cursors", () => {

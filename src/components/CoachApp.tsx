@@ -1260,8 +1260,8 @@ function Analytics({ officialTournaments, practiceLogs, routesState }: { officia
       {!loading && !error && (
         <Panel title={t("selfRatingBreakdown")}>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {(["good", "neutral", "bad"] as const).map((rating) => <div key={rating} className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-center dark:border-zinc-700 dark:bg-zinc-900"><div className="text-2xl font-black">{SELF_RATING_SYMBOLS[rating]}</div><div className="mt-1 text-lg font-bold">{selfRatingBreakdown[rating]}</div></div>)}
-            <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-center dark:border-zinc-700 dark:bg-zinc-900"><div className="text-sm font-bold">{t("notRated")}</div><div className="mt-1 text-lg font-bold">{selfRatingBreakdown.unrated}</div></div>
+            {(["good", "neutral", "bad"] as const).map((rating) => <div key={rating} className="rounded-lg border border-zinc-200 bg-white p-4 text-center text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"><div className="text-2xl font-black">{SELF_RATING_SYMBOLS[rating]}</div><div className="mt-1 text-lg font-bold">{selfRatingBreakdown[rating]}</div></div>)}
+            <div className="rounded-lg border border-zinc-200 bg-white p-4 text-center text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"><div className="text-sm font-bold">{t("notRated")}</div><div className="mt-1 text-lg font-bold">{selfRatingBreakdown.unrated}</div></div>
           </div>
         </Panel>
       )}
@@ -1727,7 +1727,7 @@ function LogTable({
         <thead className="bg-zinc-50 text-xs font-bold text-zinc-500">
           <tr>
             {[t("date"), t("discipline"), "Mode", "Score", "Time", t("judgment"), t("route"), t("selfRating"), t("memo")].map((header) => <th key={header} className="px-3 py-2">{header}</th>)}
-            <th className="sticky right-0 z-10 bg-zinc-50 px-3 py-2 shadow-[-1px_0_0_#e4e4e7]">{t("actions")}</th>
+            <th className="sticky right-0 z-10 bg-zinc-50 px-3 py-2 text-zinc-600 shadow-[-1px_0_0_#e4e4e7] dark:bg-zinc-900 dark:text-zinc-300">{t("actions")}</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-zinc-100 bg-white">
@@ -1783,10 +1783,10 @@ function LogTable({
                   {isEditing ? (
                     <textarea className={`${editInputClass} min-h-16 resize-y whitespace-pre-wrap py-2`} value={draft.memo} onChange={(event) => onDraftChange({ ...draft, memo: event.target.value })} aria-label={t("memo")} rows={2} />
                   ) : (
-                    <div className="max-w-full overflow-x-auto whitespace-nowrap pb-1 text-zinc-700 dark:text-zinc-200" tabIndex={log.memo ? 0 : undefined} aria-label={log.memo ? t("memo") : undefined}>{log.memo || "-"}</div>
+                    <div className="max-w-full overflow-x-auto whitespace-nowrap pb-1 text-zinc-800 dark:text-zinc-200" tabIndex={log.memo ? 0 : undefined} aria-label={log.memo ? t("memo") : undefined}>{log.memo || "-"}</div>
                   )}
                 </td>
-                <td className={`${cellClass} sticky right-0 z-[1] bg-white shadow-[-1px_0_0_#e4e4e7] dark:bg-zinc-900`}>
+                <td className={`${cellClass} sticky right-0 z-[1] bg-white text-zinc-900 shadow-[-1px_0_0_#e4e4e7] dark:bg-zinc-900 dark:text-zinc-100`}>
                   {isEditing ? (
                     <div className="flex gap-2"><button onClick={() => onSave(log.id)} className="rounded-md bg-zinc-950 px-3 py-1.5 text-sm font-semibold text-white">{t("save")}</button><button onClick={onCancel} className="rounded-md border border-zinc-300 px-3 py-1.5 text-sm font-semibold hover:bg-white">{t("cancel")}</button></div>
                   ) : canEdit ? (
