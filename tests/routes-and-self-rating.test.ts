@@ -255,6 +255,12 @@ test("Practice UI contains Japanese and English Route and self-rating labels", (
   }
 });
 
+test("Settings distinguishes opening a new Route form from saving it", () => {
+  const source = readFileSync(new URL("../src/components/CoachApp.tsx", import.meta.url), "utf8");
+  for (const label of ["＋ 新しいルート", "+ New route", "変更を保存", "Save changes"]) assert.match(source, new RegExp(label.replace("+", "\\+")));
+  assert.match(source, /editingRouteId \? t\("saveChanges"\) : t\("save"\)/);
+});
+
 test("self-rating controls include dark-mode styles and deleted routes are optional", () => {
   const source = readFileSync(new URL("../src/components/CoachApp.tsx", import.meta.url), "utf8");
   assert.match(source, /dark:text-emerald-200/);

@@ -464,6 +464,8 @@ const translations = {
     languageSetting: "言語",
     routeManagement: "ルート管理",
     addRoute: "ルートを追加",
+    newRoute: "＋ 新しいルート",
+    saveChanges: "変更を保存",
     routeName: "ルート名",
     noRoutes: "ルートが登録されていません。",
     loadingRoutes: "読み込み中...",
@@ -570,6 +572,8 @@ const translations = {
     languageSetting: "Language",
     routeManagement: "Route Management",
     addRoute: "Add Route",
+    newRoute: "+ New route",
+    saveChanges: "Save changes",
     routeName: "Route Name",
     noRoutes: "No routes registered.",
     loadingRoutes: "Loading...",
@@ -1568,7 +1572,7 @@ function SettingsView({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-zinc-600 dark:text-zinc-300">Cards / Numbers / Images / Words</p>
           <button type="button" onClick={() => { setSettingsError(""); setEditingRouteId(undefined); setRouteForm(emptyRoute()); setRouteFormVisible(true); }} className="h-10 rounded-md bg-zinc-950 px-4 text-sm font-semibold text-white hover:bg-zinc-800">
-            {t("addRoute")}
+            {t("newRoute")}
           </button>
         </div>
         {routeFormVisible && (
@@ -1581,7 +1585,7 @@ function SettingsView({
             <Field label={t("routeName")}><input className="input" required value={routeForm.name} onChange={(event) => setRouteForm({ ...routeForm, name: event.target.value })} /></Field>
             <Field label={t("memo")} className="md:col-span-2"><textarea className="input min-h-20 resize-y" value={routeForm.memo ?? ""} onChange={(event) => setRouteForm({ ...routeForm, memo: event.target.value })} /></Field>
             <div className="flex flex-col gap-2 md:col-span-2 sm:flex-row">
-              <button disabled={routeSaving} className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{routeSaving ? "保存中..." : editingRouteId ? t("save") : t("addRoute")}</button>
+              <button disabled={routeSaving} className="h-11 rounded-md bg-zinc-950 px-4 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60">{routeSaving ? "保存中..." : editingRouteId ? t("saveChanges") : t("save")}</button>
               <button type="button" disabled={routeSaving} onClick={resetRouteForm} className="h-11 rounded-md border border-zinc-300 px-4 font-semibold hover:bg-white disabled:opacity-60">{t("cancel")}</button>
             </div>
           </form>
