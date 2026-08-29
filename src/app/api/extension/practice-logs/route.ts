@@ -1,5 +1,5 @@
 import { getPrismaClient } from "@/lib/prisma";
-import { createExtensionFingerprint, parsePracticeLogBody, toPracticeLogResponse } from "@/lib/practice-log-api";
+import { createExtensionFingerprint, parsePracticeLogBody, toPracticeLogResponse, validateExtensionOfficialLog } from "@/lib/practice-log-api";
 import { validatePracticeLogRoute } from "@/lib/route-api";
 import { authorizeExtensionRequest, extensionCorsHeaders, extensionJsonResponse } from "@/lib/extension-auth";
 
@@ -44,6 +44,8 @@ export async function POST(request: Request) {
       select: { id: true, discipline: true },
     }));
     if (routeError) return extensionJsonResponse({ error: routeError }, { status: 400 });
+    const officialError = await validateExtensionOfficialLog(data, (id) => prisma.officialTournament.findUnique({ where: { id }, select: { id: true } }));
+    if (officialError) return extensionJsonResponse({ error: officialError }, { status: 400 });
 
     const existingLog = await prisma.practiceLog.findFirst({
       where: { extensionFingerprint: data.extensionFingerprint },
@@ -52,11 +54,6 @@ export async function POST(request: Request) {
 
     if (existingLog) {
       return extensionJsonResponse(toPracticeLogResponse(existingLog), { status: 200 });
-    }
-
-    if (data.officialTournamentId) {
-      const tournament = await prisma.officialTournament.findUnique({ where: { id: data.officialTournamentId } });
-      if (!tournament) data.officialTournamentId = null;
     }
 
     const log = await prisma.practiceLog.create({

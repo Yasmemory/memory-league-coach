@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { parsePracticeLogBody, parsePracticeLogSelfRatingPatch, updatePracticeLogSelfRatingInApi } from "../src/lib/practice-log-api.ts";
+import { parsePracticeLogBody, parsePracticeLogSelfRatingPatch, updatePracticeLogSelfRatingInApi, validateExtensionOfficialLog } from "../src/lib/practice-log-api.ts";
 import { filterLogsByRoute, filterLogsBySelfRating, getRouteAnalysis, getSelfRatingBreakdown } from "../src/lib/analytics-route-rating.ts";
 import {
   createRouteInApi,
@@ -18,6 +18,7 @@ import {
 } from "../src/lib/route-api.ts";
 import { authorizeExtensionRequest } from "../src/lib/extension-auth-core.ts";
 import { SELF_RATING_SYMBOLS } from "../src/lib/types.ts";
+import { toExtensionOfficialTournamentResponse } from "../src/lib/tournament-api.ts";
 
 const baseLog = {
   date: "2026-08-24",
@@ -363,4 +364,16 @@ test("Extension routes accept the configured token and expose only minimal field
     if (previous === undefined) delete process.env.EXTENSION_API_TOKEN;
     else process.env.EXTENSION_API_TOKEN = previous;
   }
+});
+
+test("Extension official tournament response exposes only id, name, and date", () => {
+  assert.deepEqual(toExtensionOfficialTournamentResponse({ id: "official-1", name: "Asian-Oceanian Open 2026", date: new Date("2026-08-24T00:00:00Z") }), { id: "official-1", name: "Asian-Oceanian Open 2026", date: "2026-08-24" });
+});
+
+test("Extension official logs require a valid tournament and round", async () => {
+  const find = async (id: string) => id === "official-1" ? { id } : null;
+  assert.match((await validateExtensionOfficialLog({ mode: "official", officialTournamentId: null, officialRound: "QF" }, find)) ?? "", /required/);
+  assert.match((await validateExtensionOfficialLog({ mode: "official", officialTournamentId: "official-1", officialRound: "Unknown" }, find)) ?? "", /invalid/);
+  assert.match((await validateExtensionOfficialLog({ mode: "official", officialTournamentId: "missing", officialRound: "QF" }, find)) ?? "", /does not exist/);
+  assert.equal(await validateExtensionOfficialLog({ mode: "official", officialTournamentId: "official-1", officialRound: "QF" }, find), null);
 });

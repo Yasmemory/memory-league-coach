@@ -50,6 +50,10 @@ export function toOfficialTournamentResponse(tournament: PrismaOfficialTournamen
   return { ...tournament, date: dateOnly(tournament.date) };
 }
 
+export function toExtensionOfficialTournamentResponse(tournament: Pick<PrismaOfficialTournament, "id" | "name" | "date">) {
+  return { id: tournament.id, name: tournament.name, date: dateOnly(tournament.date) };
+}
+
 export function tournamentFromApi(tournament: TournamentResponse): Tournament {
   return {
     id: tournament.id,

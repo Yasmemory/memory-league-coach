@@ -262,6 +262,18 @@ export function createExtensionFingerprint(data: Prisma.PracticeLogUncheckedCrea
   return [date, data.discipline, score, time, opponentName, result].join("|");
 }
 
+const officialRounds = new Set(["GL", "Qualifier", "R16", "QF", "SF", "F"]);
+
+export async function validateExtensionOfficialLog(
+  data: Pick<Prisma.PracticeLogUncheckedCreateInput, "mode" | "officialTournamentId" | "officialRound">,
+  findTournament: (id: string) => Promise<{ id: string } | null>,
+): Promise<string | null> {
+  if (data.mode !== "official") return null;
+  if (typeof data.officialTournamentId !== "string" || !data.officialTournamentId.trim()) return "Official tournament is required.";
+  if (typeof data.officialRound !== "string" || !officialRounds.has(data.officialRound)) return "Official round is invalid.";
+  return await findTournament(data.officialTournamentId) ? null : "Official tournament does not exist.";
+}
+
 export function toPracticeLogUpdateInput(data: Prisma.PracticeLogUncheckedCreateInput): Prisma.PracticeLogUncheckedUpdateInput {
   return {
     date: data.date,
