@@ -380,6 +380,6 @@ test("Extension official logs require a valid tournament and round", async () =>
 });
 
 test("Official Mode details include tournament, Round, and opponent for short and long names", () => {
-  assert.equal(getOfficialModeDetails("Japan Open", "QF", "Davide"), "Japan Open / QF / vs Davide");
-  assert.equal(getOfficialModeDetails("Asian-Oceanian Open 2026 Championship Finals", "QF", "Davide Fasolino"), "Asian-Oceanian Open 2026 Championship Finals / QF / vs Davide Fasolino");
+  assert.deepEqual(getOfficialModeDetails("Japan Open", "QF", "Davide"), { tournamentName: "Japan Open", matchDetails: "QF / vs Davide", title: "Japan Open / QF / vs Davide" });
+  assert.deepEqual(getOfficialModeDetails("Asian-Oceanian Open 2026 Championship Finals", "QF", "Davide Fasolino"), { tournamentName: "Asian-Oceanian Open 2026 Championship Finals", matchDetails: "QF / vs Davide Fasolino", title: "Asian-Oceanian Open 2026 Championship Finals / QF / vs Davide Fasolino" });
 });

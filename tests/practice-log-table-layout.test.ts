@@ -6,7 +6,7 @@ const coachAppSource = readFileSync(new URL("../src/components/CoachApp.tsx", im
 const globalCssSource = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
 
 test("Practice log table constrains long memos to a cell-level horizontal scroller", () => {
-  assert.match(coachAppSource, /w-full min-w-\[1120px\] table-fixed/);
+  assert.match(coachAppSource, /w-full min-w-\[1180px\] table-fixed/);
   assert.match(coachAppSource, /max-w-full overflow-x-auto whitespace-nowrap/);
   assert.doesNotMatch(coachAppSource, /min-w-56[^\n]*value=\{draft\.memo\}/);
 });
@@ -25,11 +25,14 @@ test("Practice memo has explicit readable light and dark text colors", () => {
   assert.match(coachAppSource, /overflow-x-auto whitespace-nowrap[^\n]*text-zinc-800 dark:text-zinc-200/);
 });
 
-test("Official Mode uses a separate truncated details row without overflowing its cell", () => {
+test("Official Mode uses three wrapping rows without overflowing its wider cell", () => {
   assert.match(coachAppSource, /<td className=\{`\$\{cellClass\} min-w-0 overflow-hidden`\}>/);
+  assert.match(coachAppSource, /<col className="w-52" \/>/);
   assert.match(coachAppSource, /mode === "official"/);
-  assert.match(coachAppSource, /mt-1 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap/);
-  assert.match(coachAppSource, /title=\{details\}/);
+  assert.match(coachAppSource, /details\.tournamentName.*whitespace-normal.*\[overflow-wrap:anywhere\]/);
+  assert.match(coachAppSource, /details\.matchDetails.*whitespace-normal.*\[overflow-wrap:anywhere\]/);
+  assert.match(coachAppSource, /title=\{details\.title \|\| undefined\}/);
+  assert.doesNotMatch(coachAppSource, /details && <span className="[^"]*text-ellipsis/);
 });
 
 test("Train and Rated retain their compact Mode badge", () => {

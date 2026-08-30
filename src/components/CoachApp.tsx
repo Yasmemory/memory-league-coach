@@ -1716,11 +1716,11 @@ function LogTable({
   const editInputClass = "h-9 w-full min-w-0 rounded-md border border-zinc-300 bg-white px-2 text-sm outline-none focus:border-zinc-950";
   return (
     <div className="overflow-x-auto rounded-lg border border-zinc-200">
-      <table className="w-full min-w-[1120px] table-fixed divide-y divide-zinc-200 text-left">
+      <table className="w-full min-w-[1180px] table-fixed divide-y divide-zinc-200 text-left">
         <colgroup>
           <col className="w-24" />
           <col className="w-32" />
-          <col className="w-40" />
+          <col className="w-52" />
           <col className="w-16" />
           <col className="w-16" />
           <col className="w-16" />
@@ -1845,9 +1845,10 @@ function ModeBadge({ mode, officialTournamentName, officialRound, opponentName, 
   if (mode === "official") {
     const details = getOfficialModeDetails(officialTournamentName, officialRound, opponentName);
     return (
-      <div className="min-w-0 max-w-full">
+      <div className="min-w-0 max-w-full whitespace-normal" title={details.title || undefined}>
         <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{getModeLabel(mode)}</span>
-        {details && <span className="mt-1 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-zinc-700 dark:text-zinc-300" title={details}>{details}</span>}
+        {details.tournamentName && <span className="mt-1 block max-w-full whitespace-normal text-xs font-semibold leading-snug text-zinc-800 [overflow-wrap:anywhere] dark:text-zinc-200">{details.tournamentName}</span>}
+        {details.matchDetails && <span className="mt-0.5 block max-w-full whitespace-normal text-xs font-medium leading-snug text-zinc-700 [overflow-wrap:anywhere] dark:text-zinc-300">{details.matchDetails}</span>}
       </div>
     );
   }
