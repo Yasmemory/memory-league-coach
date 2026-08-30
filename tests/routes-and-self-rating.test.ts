@@ -19,6 +19,7 @@ import {
 import { authorizeExtensionRequest } from "../src/lib/extension-auth-core.ts";
 import { SELF_RATING_SYMBOLS } from "../src/lib/types.ts";
 import { toExtensionOfficialTournamentResponse } from "../src/lib/tournament-api.ts";
+import { getOfficialModeDetails } from "../src/lib/log-display.ts";
 
 const baseLog = {
   date: "2026-08-24",
@@ -376,4 +377,9 @@ test("Extension official logs require a valid tournament and round", async () =>
   assert.match((await validateExtensionOfficialLog({ mode: "official", officialTournamentId: "official-1", officialRound: "Unknown" }, find)) ?? "", /invalid/);
   assert.match((await validateExtensionOfficialLog({ mode: "official", officialTournamentId: "missing", officialRound: "QF" }, find)) ?? "", /does not exist/);
   assert.equal(await validateExtensionOfficialLog({ mode: "official", officialTournamentId: "official-1", officialRound: "QF" }, find), null);
+});
+
+test("Official Mode details include tournament, Round, and opponent for short and long names", () => {
+  assert.equal(getOfficialModeDetails("Japan Open", "QF", "Davide"), "Japan Open / QF / vs Davide");
+  assert.equal(getOfficialModeDetails("Asian-Oceanian Open 2026 Championship Finals", "QF", "Davide Fasolino"), "Asian-Oceanian Open 2026 Championship Finals / QF / vs Davide Fasolino");
 });

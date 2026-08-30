@@ -36,6 +36,7 @@ import {
   parseMatchResultText,
   updatePracticeLogInline,
 } from "@/app/shared";
+import { getOfficialModeDetails } from "@/lib/log-display";
 import { createPracticeLogInApi, fetchPracticeLogsFromApi, readPracticeLogApiError, updatePracticeLogSelfRatingInApi, type PracticeLogRequest, type PracticeLogResponse as DbPracticeLogResponse } from "@/lib/practice-log-api";
 import { filterLogsByRoute, filterLogsBySelfRating, getRouteAnalysis, getSelfRatingBreakdown, type AnalyticsRouteFilter, type AnalyticsSelfRatingFilter } from "@/lib/analytics-route-rating";
 import { createOpponentInApi, deleteOpponentInApi, fetchOpponentsFromApi, updateOpponentInApi } from "@/lib/opponent-api";
@@ -1743,7 +1744,7 @@ function LogTable({
                   {isEditing ? <input className={editInputClass} type="date" value={draft.date} onChange={(event) => onDraftChange({ ...draft, date: event.target.value })} aria-label={t("date")} /> : formatDisplayDate(log.date)}
                 </td>
                 <td className={cellClass}><DisciplineBadge discipline={log.discipline} /></td>
-                <td className={cellClass}>
+                <td className={`${cellClass} min-w-0 overflow-hidden`}>
                   {isEditing ? (
                     <div className="grid gap-2">
                       <select className={editInputClass} value={draft.mode} onChange={(event) => onDraftChange({ ...draft, mode: event.target.value as LogMode })} aria-label="Mode">{LOG_MODES.map((mode) => <option key={mode} value={mode}>{getModeLabel(mode)}</option>)}</select>
@@ -1841,8 +1842,16 @@ function formatMonth(month: string) {
 
 function ModeBadge({ mode, officialTournamentName, officialRound, opponentName, result }: { mode?: LogMode; officialTournamentName?: string; officialRound?: string; opponentName?: string; result?: "win" | "loss" }) {
   const matchDetails = [result ? (result === "win" ? "勝ち" : "負け") : undefined, opponentName ? `vs ${opponentName}` : undefined];
-  const details = mode === "official" ? [officialTournamentName, officialRound, ...matchDetails].filter(Boolean) : matchDetails.filter(Boolean);
-  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{[getModeLabel(mode), ...details].join(" / ")}</span>;
+  if (mode === "official") {
+    const details = getOfficialModeDetails(officialTournamentName, officialRound, opponentName);
+    return (
+      <div className="min-w-0 max-w-full">
+        <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`}>{getModeLabel(mode)}</span>
+        {details && <span className="mt-1 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-xs font-semibold text-zinc-700 dark:text-zinc-300" title={details}>{details}</span>}
+      </div>
+    );
+  }
+  return <span className={`inline-flex max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md border px-2 py-1 text-xs font-bold ${getModeBadgeStyle(mode)}`} title={[getModeLabel(mode), ...matchDetails].join(" / ")}>{[getModeLabel(mode), ...matchDetails].join(" / ")}</span>;
 }
 
 function DisciplineBadge({ discipline, compact = false }: { discipline: Discipline; compact?: boolean }) {

@@ -25,6 +25,18 @@ test("Practice memo has explicit readable light and dark text colors", () => {
   assert.match(coachAppSource, /overflow-x-auto whitespace-nowrap[^\n]*text-zinc-800 dark:text-zinc-200/);
 });
 
+test("Official Mode uses a separate truncated details row without overflowing its cell", () => {
+  assert.match(coachAppSource, /<td className=\{`\$\{cellClass\} min-w-0 overflow-hidden`\}>/);
+  assert.match(coachAppSource, /mode === "official"/);
+  assert.match(coachAppSource, /mt-1 block max-w-full overflow-hidden text-ellipsis whitespace-nowrap/);
+  assert.match(coachAppSource, /title=\{details\}/);
+});
+
+test("Train and Rated retain their compact Mode badge", () => {
+  assert.match(coachAppSource, /inline-flex max-w-full overflow-hidden text-ellipsis whitespace-nowrap rounded-md border/);
+  assert.match(coachAppSource, /\[getModeLabel\(mode\), \.\.\.matchDetails\]\.join\(" \/ "\)/);
+});
+
 test("Analytics self-rating cards separate light and dark colors", () => {
   assert.match(coachAppSource, /border-zinc-200 bg-white[^\n]*text-zinc-900 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100/);
 });
