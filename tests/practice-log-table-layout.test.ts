@@ -25,6 +25,12 @@ test("Practice memo has explicit readable light and dark text colors", () => {
   assert.match(coachAppSource, /overflow-x-auto whitespace-nowrap[^\n]*text-zinc-800 dark:text-zinc-200/);
 });
 
+test("Log tables abbreviate only the displayed International Names badge", () => {
+  assert.match(coachAppSource, /<DisciplineBadge discipline=\{log\.discipline\} compact \/>/);
+  assert.match(coachAppSource, /compact && discipline === "International Names" \? "Inter" : discipline/);
+  assert.match(coachAppSource, /title=\{discipline\}/);
+});
+
 test("Official Mode uses three wrapping rows without overflowing its wider cell", () => {
   assert.match(coachAppSource, /<td className=\{`\$\{cellClass\} min-w-0 overflow-hidden`\}>/);
   assert.match(coachAppSource, /<col className="w-52" \/>/);

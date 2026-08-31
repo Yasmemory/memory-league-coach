@@ -1743,7 +1743,7 @@ function LogTable({
                 <td className={cellClass}>
                   {isEditing ? <input className={editInputClass} type="date" value={draft.date} onChange={(event) => onDraftChange({ ...draft, date: event.target.value })} aria-label={t("date")} /> : formatDisplayDate(log.date)}
                 </td>
-                <td className={cellClass}><DisciplineBadge discipline={log.discipline} /></td>
+                <td className={cellClass}><DisciplineBadge discipline={log.discipline} compact /></td>
                 <td className={`${cellClass} min-w-0 overflow-hidden`}>
                   {isEditing ? (
                     <div className="grid gap-2">
