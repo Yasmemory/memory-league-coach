@@ -29,6 +29,12 @@ function date(input: unknown) {
   const parsed = new Date(Date.UTC(y, m - 1, d));
   return parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d ? parsed : null;
 }
+function registeredAt(input: unknown) {
+  if (typeof input !== "string" || !input.trim()) return null;
+  const value = input.trim().replace(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/, (_, y, m, d) => y + "-" + m.padStart(2, "0") + "-" + d.padStart(2, "0"));
+  const parsed = new Date(/[zZ]$|[+-]\\d\\d:\\d\\d$/.test(value) ? value : value.replace(" ", "T") + "+09:00");
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 function normalize(row: Input) {
   const uuid = text(row.UUID, 128);
   const discordId = text(row.DiscordUserId, 32);
@@ -39,7 +45,7 @@ function normalize(row: Input) {
   const url = text(row.MessageUrl, 500);
   return {
     uuid, discordId, event, practicedAt,
-    registeredAt: date(row.RegisteredAt),
+    registeredAt: registeredAt(row.RegisteredAt),
     displayName: text(row.DisplayName, 100) || "生徒",
     count: count as number | null, score: score as number | null,
     correct: correct as number | null, timeSeconds: time as number | null,
