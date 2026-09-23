@@ -31,8 +31,8 @@ function date(input: unknown) {
 }
 function registeredAt(input: unknown) {
   if (typeof input !== "string" || !input.trim()) return null;
-  const value = input.trim().replace(/^(\\d{4})\\/(\\d{1,2})\\/(\\d{1,2})/, (_, y, m, d) => y + "-" + m.padStart(2, "0") + "-" + d.padStart(2, "0"));
-  const parsed = new Date(/[zZ]$|[+-]\\d\\d:\\d\\d$/.test(value) ? value : value.replace(" ", "T") + "+09:00");
+  const value = input.trim().replace(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/, (_, y, m, d) => y + "-" + m.padStart(2, "0") + "-" + d.padStart(2, "0"));
+  const parsed = new Date(/[zZ]$|[+-]\d\d:\d\d$/.test(value) ? value : value.replace(" ", "T") + "+09:00");
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 function normalize(row: Input) {
