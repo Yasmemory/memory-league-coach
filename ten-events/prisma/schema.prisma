@@ -1,0 +1,42 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Student {
+  id          String          @id @default(cuid())
+  discordId   String          @unique
+  displayName String
+  createdAt   DateTime        @default(now())
+  records     PracticeRecord[]
+}
+
+model PracticeRecord {
+  id            String    @id @default(cuid())
+  sourceUuid    String    @unique
+  studentId     String
+  student       Student   @relation(fields: [studentId], references: [id])
+  practicedAt   DateTime  @db.Date
+  registeredAt  DateTime?
+  event         String
+  count         Int?
+  score         Float?
+  correct       Float?
+  timeSeconds   Float?
+  messageId     String?
+  messageUrl    String?
+  sourceType    String?
+  status        String
+  strategy      String    @default("")
+  reflection    String    @default("")
+  nextAction    String    @default("")
+  coachComment  String    @default("")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([studentId, practicedAt])
+  @@index([studentId, event, practicedAt])
+}
