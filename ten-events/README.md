@@ -17,7 +17,7 @@ Memory League Coach の `master` とは独立した10種競技用アプリです
 3. Discord Developer PortalでOAuth2 Redirect URLを `APP_ORIGIN/api/auth/callback` に設定。
 4. 新しいDBに `npx prisma migrate deploy` を実行し、本番では `npx prisma migrate deploy` を実行。
 5. `npm run typecheck`、`npm run build`、`npm run dev` で検証。
-6. `POST /api/import` に `Authorization: Bearer <IMPORT_SECRET>` と `{"rows":[...]}` を送る（最大100行/回）。JSONキーは `UUID`, `RegisteredAt`, `TrainingDate`, `DiscordUserId`, `DisplayName`, `Event`, `Count`, `Score`, `Correct`, `MessageId`, `MessageUrl`, `SourceType`, `Status`, `TimeSeconds`。既存のスプシは読み取り権限が未接続なので、GAS/Discord Botから送る処理はまだ未設定。
+6. `POST /api/import` に `Authorization: Bearer <IMPORT_SECRET>` と `{"rows":[...]}` を送る（最大100行/回）。JSONキーは `UUID`, `RegisteredAt`, `TrainingDate`, `DiscordUserId`, `DisplayName`, `Event`, `Count`, `Score`, `Correct`, `MessageId`, `MessageUrl`, `SourceType`, `Status`, `TimeSeconds`。スプシに紐づける Apps Script は \`integration/sync.gs\` に用意済み。\`JOURNAL_IMPORT_URL\` と \`JOURNAL_IMPORT_SECRET\` を Script Properties に設定し、最初に手動実行してから時間主導トリガーを設定する。スプシそのものは変更しない。
 
 ## 公開前に必要な確認
 
